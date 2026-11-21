@@ -37,6 +37,7 @@ video{max-width:100%;max-height:420px;display:block;border-radius:8px;background
 kbd{border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px}
 </style>
 <link rel="stylesheet" href="theme.css">
+<script src="store.js"></script>
 <script src="theme.js" defer></script>
 </head>
 <body>
@@ -101,7 +102,7 @@ let fl=null,S=null,abort=false,hist=[],names=[],CONN=[],lastC=-1;
     const fs=await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
     fl=await FaceLandmarker.createFromOptions(fs,{
       baseOptions:{modelAssetPath:"https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"},
-      runningMode:"IMAGE",numFaces:1,outputFaceBlendshapes:true});
+      runningMode:"IMAGE",numFaces:1,outputFaceBlendshapes:true,minFaceDetectionConfidence:.25,minFacePresenceConfidence:.25});
     CONN=[FaceLandmarker.FACE_LANDMARKS_LIPS,FaceLandmarker.FACE_LANDMARKS_LEFT_EYE,FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE,FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW,FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW,FaceLandmarker.FACE_LANDMARKS_FACE_OVAL];
     st.textContent="Model ready. Choose a video.";
   }catch(e){st.textContent="The face model could not load. Check your internet connection and reload the page.";console.error(e)}
@@ -110,7 +111,7 @@ let fl=null,S=null,abort=false,hist=[],names=[],CONN=[],lastC=-1;
 
 const ids=['ak','ab','rm','ex','csv','pm','nm'];
 $('file').onchange=e=>{
-  const f=e.target.files[0];if(!f)return;
+  const f=e.target.files[0];if(!f)return;curFile=f;videoSaved=false;
   v.src=URL.createObjectURL(f);S=null;hist=[];$('th').innerHTML='';$('bl').textContent='Analyze a video to see them.';
   ids.concat('ud').forEach(i=>$(i).disabled=true);
   goBtn.disabled=!fl;st.textContent=fl?"Ready. Press Analyze.":st.textContent;
@@ -251,6 +252,32 @@ $('csv').onclick=()=>{
   S.frames.forEach((f,i)=>rows.push([i,(i/S.fps).toFixed(3),S.keys.has(i)?'key':S.brk.has(i)?'breakdown':'','"'+(S.cm[i]||'').replace(/"/g,'""')+'"',...f.bs.map(s=>s.toFixed(4))].join(',')));
   dl(URL.createObjectURL(new Blob([rows.join('\n')],{type:'text/csv'})),'face_curves.csv');
 };
+// ---- auto-save and restore ----
+let curFile=null,videoSaved=false,lastSig='',storeOff=false;
+const sl=()=>({gap:$('gap').value,sm:$('sm').value,bt:$('bt').value});
+const sigF=()=>S?JSON.stringify([[...S.keys],[...S.brk],S.cm,sl(),$('grp').value,$('sk').checked]):'';
+setInterval(async()=>{
+  if(!S||!curFile||storeOff)return;
+  const g=sigF();if(g===lastSig)return;lastSig=g;
+  if(!videoSaved){if(!(await Store.put('face:video',{blob:curFile,name:curFile.name||'video'}))){storeOff=true;Store.badge('⚠️ Could not auto-save (storage full or blocked)');return}videoSaved=true}
+  S.thumbUrls=S.thumbUrls||S.thumbs.map(c=>c.toDataURL('image/jpeg',.7));
+  const ok=await Store.put('face:state',{t:Date.now(),name:curFile.name||'video',fps:S.fps,n:S.n,names,frames:S.frames,thumbUrls:S.thumbUrls,keys:[...S.keys],brk:[...S.brk],cm:S.cm,sl:sl(),grp:$('grp').value,sk:$('sk').checked});
+  Store.badge(ok?'💾 Saved '+new Date().toLocaleTimeString():'⚠️ Could not auto-save');
+},3000);
+async function restoreF(){
+  const [s0,vd]=await Promise.all([Store.get('face:state'),Store.get('face:video')]);
+  if(!s0||!vd){st.textContent='Could not find the saved video.';return}
+  curFile=vd.blob;videoSaved=true;v.src=URL.createObjectURL(vd.blob);
+  await new Promise(r=>{v.onloadedmetadata=()=>{ov.width=v.videoWidth;ov.height=v.videoHeight;r()}});
+  const thumbs=await Promise.all(s0.thumbUrls.map(u=>new Promise(r=>{const i=new Image();i.onload=()=>{const c=document.createElement('canvas');c.width=i.width;c.height=i.height;c.getContext('2d').drawImage(i,0,0);r(c)};i.src=u})));
+  for(const k of ['gap','sm','bt']){$(k).value=s0.sl[k];$({gap:'gv',sm:'sv',bt:'bv'}[k]).textContent=s0.sl[k]}
+  $('grp').value=s0.grp;$('sk').checked=s0.sk;names=s0.names;
+  S={fps:s0.fps,n:s0.n,frames:s0.frames,thumbs,keys:new Set(),brk:new Set(),cm:s0.cm,thumbUrls:s0.thumbUrls};
+  hist=[];lastC=-1;compute();S.keys=new Set(s0.keys);S.brk=new Set(s0.brk);renderThumbs();
+  ids.forEach(i=>$(i).disabled=false);goBtn.disabled=!fl;
+  st.textContent=`Done. Restored your saved work from ${new Date(s0.t).toLocaleString()}.`;lastSig=sigF();
+}
+Store.get('face:state').then(async s=>{if(s&&await Store.get('face:video'))Store.banner(`💾 Saved work found: ${s.name} · ${new Date(s.t).toLocaleString()}`,restoreF,()=>{Store.del('face:state');Store.del('face:video')})});
 </script>
 </body>
 </html>

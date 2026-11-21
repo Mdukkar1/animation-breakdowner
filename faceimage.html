@@ -29,6 +29,7 @@ label{font-size:13px;display:flex;gap:6px;align-items:center}
 #st{font-size:13px}
 </style>
 <link rel="stylesheet" href="theme.css">
+<script src="store.js"></script>
 <script src="theme.js" defer></script>
 </head>
 <body>
@@ -91,7 +92,7 @@ const COLS=['#ff5f9e','#4cc9f0','#4cc9f0','#ffd166','#ffd166','#ffffff'];
   try{
     const {FaceLandmarker,FilesetResolver}=await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs");
     const fs=await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
-    fl=await FaceLandmarker.createFromOptions(fs,{baseOptions:{modelAssetPath:"https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"},runningMode:"IMAGE",numFaces:1,outputFaceBlendshapes:true});
+    fl=await FaceLandmarker.createFromOptions(fs,{baseOptions:{modelAssetPath:"https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"},runningMode:"IMAGE",numFaces:1,outputFaceBlendshapes:true,minFaceDetectionConfidence:.25,minFacePresenceConfidence:.25});
     CONN=[FaceLandmarker.FACE_LANDMARKS_LIPS,FaceLandmarker.FACE_LANDMARKS_LEFT_EYE,FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE,FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW,FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW,FaceLandmarker.FACE_LANDMARKS_FACE_OVAL];
     st.textContent=im?"Model ready.":"Model ready. Choose a photo.";
     if(im)detect();
@@ -116,19 +117,41 @@ function analyze(){
   $('bl').innerHTML=all.map(([n,s])=>`<div class="b"><span>${n}</span><i style="width:${Math.round(s*100)}%"></i><span>${s.toFixed(2)}</span></div>`).join('');
 }
 
-function detect(){
+const dims=i=>[i.naturalWidth||i.width,i.naturalHeight||i.height];
+const crop=(src,sx,sy,sw,sh,sc)=>{const c=document.createElement('canvas');c.width=Math.round(sw*sc);c.height=Math.round(sh*sc);c.getContext('2d').drawImage(src,sx,sy,sw,sh,0,0,c.width,c.height);return c};
+const rot=(src,deg)=>{const [w,h]=dims(src),q=Math.abs(deg)===90,c=document.createElement('canvas');c.width=q?h:w;c.height=q?w:h;const x=c.getContext('2d');x.translate(c.width/2,c.height/2);x.rotate(deg*Math.PI/180);x.drawImage(src,-w/2,-h/2);return c};
+const tryDetect=s=>{const r=fl.detect(s),bc=r.faceBlendshapes&&r.faceBlendshapes[0],L=r.faceLandmarks&&r.faceLandmarks[0];return L&&bc?{L,bc}:null};
+const nap=()=>new Promise(r=>setTimeout(r,30));
+async function findFace(){
+  let h=tryDetect(im);if(h)return{...h,src:im,note:''};
+  st.textContent='Looking harder (rotating and zooming)…';await nap();
+  for(const d of [90,-90,180]){const c=rot(im,d);h=tryDetect(c);if(h)return{...h,src:c,note:' The photo was sideways or upside down, so it was straightened.'}}
+  const [W,H]=dims(im);
+  for(const f of [.65,.45,.3])for(const fy of [0,.5,1])for(const fx of [0,.5,1]){
+    const cw=W*f,ch=H*f,ox=fx*(W-cw),oy=fy*(H-ch),sc=Math.min(3,Math.max(1,512/Math.min(cw,ch)));
+    h=tryDetect(crop(im,ox,oy,cw,ch,sc));
+    if(h)return{L:h.L.map(p=>({x:(ox+p.x*cw)/W,y:(oy+p.y*ch)/H,z:p.z})),bc:h.bc,src:im,note:' The face was small, so it was found by zooming in.'};
+  }
+  return null;
+}
+async function detect(){
   if(!im)return;
   if(!fl){st.textContent="Image loaded. The face model is still loading…";return}
-  const r=fl.detect(im),bc=r.faceBlendshapes&&r.faceBlendshapes[0];
-  F=(r.faceLandmarks&&r.faceLandmarks[0])||null;BS=bc?Object.fromEntries(bc.categories.map(c=>[c.categoryName,c.score])):null;
-  const ok=F&&BS;
-  if(ok){analyze();st.textContent="Done. Face found. Check the bars, draw on the photo, or export."}
-  else{$('mood').textContent='No face found';$('chips').textContent='';$('bl').textContent='';st.textContent="No face detected. Try a clear, front-facing photo."}
-  ['e2','e3','e4'].forEach(i=>$(i).disabled=!ok);$('e1').disabled=false;
+  st.textContent='Looking for the face…';await nap();
+  const h=await findFace();
+  if(h){
+    if(h.src!==im){im=h.src;const [w,hh]=dims(im),s=Math.min(1,1400/Math.max(w,hh));cv.width=Math.round(w*s);cv.height=Math.round(hh*s)}
+    F=h.L;BS=Object.fromEntries(h.bc.categories.map(c=>[c.categoryName,c.score]));analyze();
+    st.textContent="Done. Face found."+h.note+" Check the bars, draw on the photo, or export.";
+  }else{
+    F=null;BS=null;$('mood').textContent='No face found';$('chips').textContent='';$('bl').textContent='';
+    st.textContent="No face found. The face should be big, well lit, mostly front-facing and uncovered. Cartoons and 3D renders often fail.";
+  }
+  ['e2','e3','e4'].forEach(i=>$(i).disabled=!h);$('e1').disabled=false;
   render();
 }
 function load(f){
-  if(!f||!f.type.startsWith('image/'))return;
+  if(!f||!f.type.startsWith('image/'))return;curBlob=f;imgSaved=false;
   const i=new Image();
   i.onload=()=>{im=i;const s=Math.min(1,1400/Math.max(i.naturalWidth,i.naturalHeight));
     cv.width=Math.round(i.naturalWidth*s);cv.height=Math.round(i.naturalHeight*s);ann=[];F=null;$('cm').value='';detect()};
@@ -186,6 +209,29 @@ $('e2').onclick=()=>{const c=document.createElement('canvas');c.width=cv.width;c
 $('e3').onclick=()=>dl(blob(JSON.stringify({width:cv.width,height:cv.height,comment:$('cm').value,mood:MOOD,measurements:Object.fromEntries(MT),blendshapes:BS,
   landmarks:F.map(p=>[+p.x.toFixed(4),+p.y.toFixed(4),+p.z.toFixed(4)])},null,2),'application/json'),'face_expression.json');
 $('e4').onclick=()=>dl(blob('name,value\n'+Object.entries(BS).map(([n,s])=>`${n},${s.toFixed(4)}`).join('\n'),'text/csv'),'face_expression.csv');
+// ---- auto-save and restore ----
+let curBlob=null,imgSaved=false,lastSig='',storeOff=false;
+const sigF=()=>JSON.stringify([ann,$('cm').value,$('bg').value,$('tln').checked,$('tpts').checked]);
+setInterval(async()=>{
+  if(!im||!curBlob||storeOff)return;
+  const g=sigF();if(g===lastSig)return;lastSig=g;
+  if(!imgSaved){if(!(await Store.put('faceimage:img',{blob:curBlob,name:curBlob.name||'image'}))){storeOff=true;Store.badge('⚠️ Could not auto-save (storage full or blocked)');return}imgSaved=true}
+  const ok=await Store.put('faceimage:state',{t:Date.now(),name:curBlob.name||'image',ann,cm:$('cm').value,bg:$('bg').value,tln:$('tln').checked,tpts:$('tpts').checked});
+  Store.badge(ok?'💾 Saved '+new Date().toLocaleTimeString():'⚠️ Could not auto-save');
+},3000);
+async function restoreFI(){
+  const [s0,d]=await Promise.all([Store.get('faceimage:state'),Store.get('faceimage:img')]);
+  if(!s0||!d){st.textContent='Could not find the saved image.';return}
+  curBlob=d.blob;imgSaved=true;
+  const i=new Image();
+  i.onload=()=>{
+    im=i;const sc=Math.min(1,1400/Math.max(i.naturalWidth,i.naturalHeight));cv.width=Math.round(i.naturalWidth*sc);cv.height=Math.round(i.naturalHeight*sc);
+    ann=s0.ann;$('cm').value=s0.cm;$('bg').value=s0.bg;$('tln').checked=s0.tln;$('tpts').checked=s0.tpts;
+    detect();lastSig=sigF();
+  };
+  i.src=URL.createObjectURL(d.blob);
+}
+Store.get('faceimage:state').then(async s=>{if(s&&await Store.get('faceimage:img'))Store.banner(`💾 Saved work found: ${s.name} · ${new Date(s.t).toLocaleString()}`,restoreFI,()=>{Store.del('faceimage:state');Store.del('faceimage:img')})});
 </script>
 </body>
 </html>

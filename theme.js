@@ -98,7 +98,7 @@ HU.forEach(h=>{const i=document.createElement('i');i.title='Colour theme';i.styl
 document.body.append(th);setHue(HU.includes(saved)?saved:0);
 
 // help panel
-const HELP={'index.html':[['Space','Play or pause'],['← →','Step one frame'],['[  ]','Previous or next marker'],['K','Add a key pose'],['B','Add a breakdown'],['X','Remove marker'],['Z','Undo'],['P  T  E','Pen, text, eraser'],['Esc','Stop drawing'],['?','Show this help']],
+const HELP={'index.html':[['Space','Play or pause'],['← →','Step one frame'],['[  ]','Previous or next marker'],['K','Add a key pose'],['I  O','Set cut start and end'],['B','Add a breakdown'],['X','Remove marker'],['Z','Undo'],['P  T  E','Pen, text, eraser'],['Esc','Stop drawing'],['?','Show this help']],
  'face.html':[['Space','Play or pause'],['← →','Step one frame'],['[  ]','Previous or next marker'],['K','Add a key expression'],['B','Add a breakdown'],['X','Remove marker'],['Z','Undo'],['?','Show this help']],
  'faceimage.html':[['Ctrl+V','Paste a photo'],['Drop','Drag a photo onto the top box'],['Draw','Pick Pen, Text or Eraser, then click the photo'],['?','Show this help']],
  'image.html':[['Ctrl+V','Paste an image'],['Drop','Drag an image onto the top box'],['Draw','Pick Pen, Text or Eraser, then click the picture'],['?','Show this help']]};

@@ -35,6 +35,7 @@ video{max-width:100%;max-height:420px;display:block;border-radius:8px;background
 kbd{border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px}
 </style>
 <link rel="stylesheet" href="theme.css">
+<script src="store.js"></script>
 <script src="theme.js" defer></script>
 </head>
 <body>
@@ -47,6 +48,7 @@ kbd{border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px}
   <label>Analysis FPS
     <select id="fps"><option>6</option><option selected>12</option><option>24</option></select>
   </label>
+  <label>👥 Characters in video <select id="nch"><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
   <button class="p" id="go" disabled>Analyze</button>
   <button id="cancel" hidden>Cancel</button>
   <span id="st">Loading pose model…</span>
@@ -62,9 +64,20 @@ kbd{border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px}
     <label>Speed
       <select id="spd"><option value=".1">0.1×</option><option value=".25">0.25×</option><option value=".5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>
     </label>
+    <label id="chw" style="display:none">👥 Character <select id="chs"></select></label>
     <label><input type="checkbox" id="gh" checked> Ghost previous key</label>
     <label><input type="checkbox" id="lp"> Loop between markers</label>
     <span id="info"></span>
+  </div>
+  <div id="tbar" title="Click to jump. The bright part is what you keep."><i></i><u></u></div>
+  <div class="row" style="margin-top:8px">
+    <b style="font-size:13px">✂️ Cut</b>
+    <button id="ti" title="Keep from the current frame (I)">⏮ Start here</button>
+    <button id="to" title="Keep up to the current frame (O)">⏭ End here</button>
+    <button id="tr" title="Keep the whole video">↺ Keep all</button>
+    <label><input type="checkbox" id="tpl"> Play only the kept part</label>
+    <button class="ex" id="tv" title="Record the kept part as a new video file">✂️ Save cut video</button>
+    <span id="tinfo" style="font-size:13px"></span>
   </div>
   <div class="row" style="margin-top:8px">
     <b style="font-size:13px">Draw on this frame</b>
@@ -79,6 +92,7 @@ kbd{border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px}
   <div class="row" style="margin-top:8px">
     <button id="k2">+ Key here</button><button id="b2">+ Breakdown here</button><button id="r2">Remove marker here</button>
   </div>
+  <div class="hint" id="eh" style="display:none;font-size:14px;color:#ffd166;opacity:1;margin:8px 0 0"></div>
   <div class="row" style="margin-top:8px;align-items:flex-start"><b style="font-size:13px;padding-top:6px">💬 Comment on this frame</b><textarea id="cm" rows="2" placeholder="Write a note for the frame you are on (saved automatically)…" style="flex:1;min-width:220px"></textarea></div>
   <div class="hint">Shortcuts: <kbd>Space</kbd> play · <kbd>←</kbd><kbd>→</kbd> step · <kbd>[</kbd><kbd>]</kbd> markers · <kbd>K</kbd> key · <kbd>B</kbd> breakdown · <kbd>X</kbd> remove · <kbd>P</kbd> pen · <kbd>T</kbd> text · <kbd>E</kbd> eraser · <kbd>Esc</kbd> stop drawing</div>
 </div>
@@ -107,6 +121,15 @@ kbd{border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px}
     <button id="cp" disabled>Copy timecodes</button>
     <button id="zip" disabled>Export frames ZIP</button>
   </div>
+  <div class="row" style="margin-top:8px">
+    <b style="font-size:13px">🎞️ Image sequence</b>
+    <label>Frames per second <select id="sqf"><option>6</option><option>12</option><option selected>24</option><option>30</option></select></label>
+    <label>Format <select id="sqt"><option value="jpeg">JPEG (smaller)</option><option value="png">PNG (best quality)</option></select></label>
+    <label>Size <select id="sqz"><option value="1">Original</option><option value=".5">Half</option></select></label>
+    <label><input type="checkbox" id="sqs"> Skeleton</label>
+    <label><input type="checkbox" id="sqd" checked> Drawings and comments</label>
+    <button class="ex" id="seq">🎞️ Export all frames ZIP</button>
+  </div>
 </div>
 
 <div class="card"><b>💬 All comments</b><div id="cml" style="margin-top:8px;font-size:13px"></div></div>
@@ -134,8 +157,8 @@ const BONES=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23
 })();
 
 function load(f){
-  if(!f)return;
-  v.src=URL.createObjectURL(f);S=null;$('tool').value='';ov.classList.remove('on');hist=[];$('th').innerHTML='';
+  if(!f)return;curFile=f;videoSaved=false;
+  v.src=URL.createObjectURL(f);S=null;$('tool').value='';ov.classList.remove('on');$('eh').style.display='none';hist=[];$('th').innerHTML='';
   goBtn.disabled=false;st.textContent="Ready. Press Analyze.";
   ['ak','ab','rm','ex','csv','sheet','cp','zip','ud','pm','nm'].forEach(i=>$(i).disabled=true);
 }
@@ -147,6 +170,36 @@ dz.ondrop=e=>{e.preventDefault();dz.classList.remove('over');load(e.dataTransfer
 v.onloadedmetadata=()=>{ov.width=v.videoWidth;ov.height=v.videoHeight};
 $('spd').onchange=()=>{v.playbackRate=+$('spd').value};
 
+let trim={a:0,b:null};
+const O=()=>(S&&S.t0)||0,TT=i=>O()+i/S.fps;
+const range=()=>[Math.min(trim.a,v.duration||0),Math.min(trim.b??v.duration,v.duration||0)];
+function trimTick(){
+  if(!v.duration)return;const [a,b]=range(),d=v.duration,bar=$('tbar');
+  bar.firstChild.style.left=a/d*100+'%';bar.firstChild.style.width=(b-a)/d*100+'%';bar.lastChild.style.left=v.currentTime/d*100+'%';
+  const stale=S&&(Math.abs(S.t0-a)>.01||Math.abs(S.n/S.fps-(b-a))>1.5/S.fps);
+  $('tinfo').textContent=`Keep ${a.toFixed(2)}s to ${b.toFixed(2)}s (${(b-a).toFixed(2)}s)${stale?' · press Analyze to use this cut':''}`;
+  if($('tpl').checked&&!v.paused){if(v.currentTime>=b-.01)v.currentTime=a;else if(v.currentTime<a-.01)v.currentTime=a}
+}
+$('ti').onclick=()=>{if(v.duration)trim.a=Math.min(v.currentTime,(trim.b??v.duration)-.05)};
+$('to').onclick=()=>{if(v.duration)trim.b=Math.max(v.currentTime,trim.a+.05)};
+$('tr').onclick=()=>{trim={a:0,b:null}};
+$('tbar').onclick=e=>{if(v.duration)v.currentTime=e.offsetX/$('tbar').clientWidth*v.duration};
+$('tv').onclick=async()=>{
+  const cap=v.captureStream||v.mozCaptureStream;
+  if(!v.duration)return void(st.textContent='Choose a video first.');
+  if(!cap||!window.MediaRecorder)return void(st.textContent='This browser cannot save a cut video. Use the image sequence export instead.');
+  const [a,b]=range(),keepRate=v.playbackRate,mt=['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'].find(t=>MediaRecorder.isTypeSupported(t));
+  const rec=new MediaRecorder(cap.call(v),{mimeType:mt,videoBitsPerSecond:8e6}),chunks=[];
+  rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
+  const done=new Promise(r=>rec.onstop=r);
+  v.pause();await seek(a);v.playbackRate=1;abort=false;$('cancel').hidden=false;$('tv').disabled=true;
+  rec.start(250);await v.play();
+  await new Promise(r=>{const id=setInterval(()=>{st.textContent=`Recording the cut… ${(v.currentTime-a).toFixed(1)} / ${(b-a).toFixed(1)}s`;if(v.currentTime>=b-.03||v.ended||abort){clearInterval(id);r()}},100)});
+  v.pause();rec.stop();await done;v.playbackRate=keepRate;$('cancel').hidden=true;$('tv').disabled=false;
+  if(abort)st.textContent='Cut cancelled.';
+  else{dl(URL.createObjectURL(new Blob(chunks,{type:'video/webm'})),'cut_video.webm');st.textContent=`Saved the cut (${(b-a).toFixed(1)}s) as cut_video.webm.`}
+  await seek(a);
+};
 // Fixed: resolves immediately if already at target time (Safari never fires "seeked" then)
 const seek=t=>new Promise(r=>{
   t=Math.max(0,Math.min(t,v.duration-0.001));
@@ -158,30 +211,56 @@ const seek=t=>new Promise(r=>{
 $('cancel').onclick=()=>{abort=true};
 goBtn.onclick=async()=>{
   goBtn.disabled=true;$('cancel').hidden=false;abort=false;v.pause();
-  const fps=+$('fps').value,n=Math.max(2,Math.floor(v.duration*fps));
-  const frames=[],thumbs=[],pv=[];let last=null;
+  if(lm)await lm.setOptions({numPoses:+$('nch').value});
+  const fps=+$('fps').value,[ta,tb]=range(),n=Math.max(2,Math.floor((tb-ta)*fps));
+  let frames=[];const thumbs=[],pv=[],tracks=[],N=+$('nch').value;
   const pc=document.createElement('canvas');pc.width=32;pc.height=24;const px=pc.getContext('2d',{willReadFrequently:true});
   const c=document.createElement('canvas'),tw=160,th=Math.round(tw*v.videoHeight/v.videoWidth);
   c.width=tw;c.height=th;const cx=c.getContext('2d');
   for(let i=0;i<n;i++){
     if(abort){st.textContent="Analysis cancelled.";goBtn.disabled=false;$('cancel').hidden=true;return}
-    await seek(i/fps);
-    if(lm){const r=lm.detect(v),p=r.landmarks&&r.landmarks[0];if(p)last=p;frames.push(last)}
+    await seek(ta+i/fps);
+    if(lm){track(tracks,N,lm.detect(v).landmarks||[],i)}
     else{frames.push(null);px.drawImage(v,0,0,32,24);const d=px.getImageData(0,0,32,24).data,a=[];for(let q=0;q<d.length;q+=4)a.push([(d[q]+d[q+1]+d[q+2])/765,0]);pv.push(a)}
     cx.drawImage(v,0,0,tw,th);const t=document.createElement('canvas');t.width=tw;t.height=th;t.getContext('2d').drawImage(c,0,0);thumbs.push(t);
     st.textContent=`Analyzing ${i+1}/${n}…`;
   }
   $('cancel').hidden=true;
-  const pix=!lm;
-  if(!pix){const first=frames.find(f=>f);
-    if(!first){st.textContent="No person detected in this video.";goBtn.disabled=false;return}
-    for(let i=0;i<n;i++)if(!frames[i])frames[i]=first;}
-  S={fps,n,pix,frames:pix?null:frames,thumbs,vec:pix?pv:frames.map(norm),keys:new Set(),brk:new Set(),ann:{},cm:{}};
+  const pix=!lm;let chars=null;
+  if(!pix){
+    if(!tracks.length){st.textContent="No person detected in this video.";goBtn.disabled=false;return}
+    tracks.sort((a,b)=>cenX(a.f[0])-cenX(b.f[0]));
+    chars=tracks.map(t=>{const f=t.f,first=f.find(x=>x);for(let i=0;i<n;i++)if(!f[i])f[i]=first;return f});frames=chars[0];
+  }
+  S={fps,t0:ta,n,pix,frames:pix?null:frames,thumbs,vec:pix?pv:frames.map(norm),keys:new Set(),brk:new Set(),ann:{},cm:{}};
+  if(chars){S.chars=chars;S.cvec=chars.map(f=>f.map(norm));S.vec=S.cvec[0];S.act=0;S.cstate={};fillChars()}else $('chw').style.display='none';
   hist=[];compute();
   ['ak','ab','rm','ex','csv','sheet','cp','zip','pm','nm'].forEach(i=>$(i).disabled=false);goBtn.disabled=false;
   await seek(0);draw();
 };
 
+const cenX=d=>(d[11].x+d[12].x+d[23].x+d[24].x)/4,cenY=d=>(d[11].y+d[12].y+d[23].y+d[24].y)/4;
+function track(T,N,dets,i){
+  const pr=[],gt=new Set(),gd=new Set();
+  T.forEach((t,a)=>dets.forEach((d,b)=>pr.push([Math.hypot(cenX(d)-t.x,cenY(d)-t.y),a,b])));
+  pr.sort((p,q)=>p[0]-q[0]);
+  for(const [,a,b] of pr){if(gt.has(a)||gd.has(b))continue;gt.add(a);gd.add(b);const t=T[a];t.last=dets[b];t.x=cenX(dets[b]);t.y=cenY(dets[b])}
+  dets.forEach((d,b)=>{if(!gd.has(b)&&T.length<N)T.push({last:d,x:cenX(d),y:cenY(d),f:new Array(i).fill(d)})});
+  T.forEach(t=>t.f.push(t.last));
+}
+function fillChars(){const q=$('chs');q.innerHTML=S.chars.map((_,k)=>`<option value="${k}">Character ${k+1}</option>`).join('');q.value=S.act;$('chw').style.display=S.chars.length>1?'':'none'}
+function setChar(k){
+  S.cstate[S.act]={keys:S.keys,brk:S.brk,orig:S.orig||{}};
+  S.act=k;S.frames=S.chars[k];S.vec=S.cvec[k];
+  const c=S.cstate[k];S.orig=c?c.orig:{};hist=[];$('ud').disabled=true;
+  compute();if(c){S.keys=c.keys;S.brk=c.brk;renderThumbs();status()}
+}
+$('chs').onchange=()=>setChar(+$('chs').value);
+function multiDraw(g,i,W,H){
+  if(!S.chars||S.chars.length<2)return;g.save();g.font=`bold ${W/36}px sans-serif`;g.lineWidth=4;
+  S.chars.forEach((f,k)=>{if(k!==S.act)skel(g,f[i],W,H,'rgba(255,255,255,.45)');const h=f[i][0];g.strokeStyle='#000';g.fillStyle=k===S.act?'#ffd166':'#fff';g.strokeText(k+1,h.x*W-6,h.y*H-W/30);g.fillText(k+1,h.x*W-6,h.y*H-W/30)});
+  g.restore();
+}
 function norm(p){
   const hx=(p[23].x+p[24].x)/2,hy=(p[23].y+p[24].y)/2,sx=(p[11].x+p[12].x)/2,sy=(p[11].y+p[12].y)/2;
   const sc=Math.max(Math.hypot(sx-hx,sy-hy),0.02);
@@ -220,15 +299,15 @@ function renderThumbs(){
   for(const [i,type] of sorted()){
     const d=document.createElement('div');d.className='t '+type;
     const c=document.createElement('canvas');c.width=S.thumbs[i].width;c.height=S.thumbs[i].height;c.getContext('2d').drawImage(S.thumbs[i],0,0);
-    d.append(c,`${label(type)} · f${i} · ${(i/S.fps).toFixed(2)}s`);
-    d.onclick=()=>{v.currentTime=i/S.fps};
-    d.ondblclick=async()=>{await seek(i/S.fps);const f=document.createElement('canvas');f.width=v.videoWidth;f.height=v.videoHeight;f.getContext('2d').drawImage(v,0,0);dl(f.toDataURL('image/png'),`${label(type).toLowerCase()}_f${i}.png`)};
+    d.append(c,`${label(type)} · f${i} · ${TT(i).toFixed(2)}s`);
+    d.onclick=()=>{v.currentTime=TT(i)};
+    d.ondblclick=async()=>{await seek(TT(i));const f=document.createElement('canvas');f.width=v.videoWidth;f.height=v.videoHeight;f.getContext('2d').drawImage(v,0,0);dl(f.toDataURL('image/png'),`${label(type).toLowerCase()}_f${i}.png`)};
     box.append(d);
   }
 }
 function dl(href,name){const a=document.createElement('a');a.href=href;a.download=name;a.click()}
 
-function cur(){return S?Math.min(S.n-1,Math.max(0,Math.round(v.currentTime*S.fps))):0}
+function cur(){return S?Math.min(S.n-1,Math.max(0,Math.round((v.currentTime-O())*S.fps))):0}
 const fpsNow=()=>S?S.fps:+$('fps').value;
 
 function skel(g,p,W,H,color,dash){
@@ -237,12 +316,13 @@ function skel(g,p,W,H,color,dash){
   g.setLineDash([]);
 }
 function draw(){
+  trimTick();
   const g=ov.getContext('2d');g.clearRect(0,0,ov.width,ov.height);
   if(S&&S.frames&&$('sk').checked){
     const i=cur(),p=S.frames[i],W=ov.width,H=ov.height;
     if($('gh').checked){const prev=[...S.keys].filter(k=>k<i).pop();if(prev!==undefined)skel(g,S.frames[prev],W,H,'rgba(37,99,235,.7)',true)}
     const col=S.keys.has(i)?'#e5383b':S.brk.has(i)?'#f59e0b':'#22c55e';
-    skel(g,p,W,H,col);if($('tool').value==='joint')for(const j of JOINTS){g.beginPath();g.arc(p[j].x*W,p[j].y*H,W/70,0,7);g.fillStyle='#fff';g.fill();g.lineWidth=2;g.strokeStyle=col;g.stroke()}
+    skel(g,p,W,H,col);multiDraw(g,i,W,H);if($('tool').value==='joint'){const sc=W/(ov.clientWidth||W);for(const j of JOINTS){g.beginPath();g.arc(p[j].x*W,p[j].y*H,11*sc,0,7);g.fillStyle='rgba(255,255,255,.9)';g.fill();g.lineWidth=3*sc;g.strokeStyle=col;g.stroke()}}
     if(S.keys.has(i)||S.brk.has(i)){g.fillStyle=col;g.font=`bold ${W/25}px sans-serif`;g.fillText(S.keys.has(i)?'KEY':'BREAKDOWN',12,W/20)}
   }
   if(S)paintAnn(g,S.ann[cur()],ov.width,ov.height);
@@ -255,16 +335,16 @@ function draw(){
   for(const i of S.keys){t.fillStyle='#e5383b';t.fillRect(X(i)-2,6,4,h-12);t.beginPath();t.arc(X(i),8,6,0,7);t.fill()}
   for(const i in S.cm)if(S.cm[i]){t.font='13px sans-serif';t.fillText('💬',X(+i)-7,h-2)}
   t.fillStyle='#2563eb';t.fillRect(X(cur())-1,0,2,h);
-  const c=cur();$('info').textContent=`Frame ${c} / ${S.n-1} · ${(c/S.fps).toFixed(2)}s`;
+  const c=cur();$('info').textContent=`Frame ${c} / ${S.n-1} · ${TT(c).toFixed(2)}s`;
   // loop between the markers around the playhead
   if($('lp').checked&&!v.paused){
     const m=sorted().map(x=>x[0]),a=m.filter(k=>k<=c).pop(),b=m.find(k=>k>c);
-    if(a!==undefined&&b!==undefined&&v.currentTime>=b/S.fps)v.currentTime=a/S.fps;
+    if(a!==undefined&&b!==undefined&&v.currentTime>=TT(b))v.currentTime=TT(a);
   }
 }
 (function loop(){draw();requestAnimationFrame(loop)})();
 
-tl.onclick=e=>{if(!S)return;const r=tl.getBoundingClientRect();v.currentTime=(e.clientX-r.left)/r.width*(S.n-1)/S.fps};
+tl.onclick=e=>{if(!S)return;const r=tl.getBoundingClientRect();v.currentTime=O()+(e.clientX-r.left)/r.width*(S.n-1)/S.fps};
 
 // editing with undo
 const snap=()=>{hist.push([[...S.keys],[...S.brk]]);if(hist.length>50)hist.shift();$('ud').disabled=false};
@@ -277,7 +357,7 @@ $('ak').onclick=addKey;$('ab').onclick=addBrk;$('rm').onclick=rmMark;$('ud').onc
 
 // navigation
 const step=d=>{v.pause();v.currentTime=Math.max(0,Math.min(v.duration,v.currentTime+d/fpsNow()))};
-const jump=dir=>{if(!S)return;const c=cur(),m=sorted().map(x=>x[0]);const t=dir>0?m.find(k=>k>c):m.filter(k=>k<c).pop();if(t!==undefined)v.currentTime=t/S.fps};
+const jump=dir=>{if(!S)return;const c=cur(),m=sorted().map(x=>x[0]);const t=dir>0?m.find(k=>k>c):m.filter(k=>k<c).pop();if(t!==undefined)v.currentTime=TT(t)};
 $('pf').onclick=()=>step(-1);$('nf').onclick=()=>step(1);
 $('pm').onclick=()=>jump(-1);$('nm').onclick=()=>jump(1);
 document.addEventListener('keydown',e=>{
@@ -287,7 +367,7 @@ document.addEventListener('keydown',e=>{
   else if(k===' ')v.paused?v.play():v.pause();
   else if(k==='[')jump(-1);else if(k===']')jump(1);
   else if(k==='k')addKey();else if(k==='b')addBrk();else if(k==='x')rmMark();
-  else if(k==='z')undo();else if(k==='p')setTool('pen');else if(k==='t')setTool('text');else if(k==='e')setTool('erase');else if(k==='escape')setTool('');else ok=false;
+  else if(k==='z')undo();else if(k==='i')$('ti').click();else if(k==='o')$('to').click();else if(k==='p')setTool('pen');else if(k==='t')setTool('text');else if(k==='e')setTool('erase');else if(k==='escape')setTool('');else ok=false;
   if(ok)e.preventDefault();
 });
 
@@ -302,7 +382,7 @@ function paintAnn(g,list,W,H){
 const pt=e=>{const r=ov.getBoundingClientRect();return[(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height]};
 const flist=()=>S.ann[cur()]||(S.ann[cur()]=[]);
 let stroke=null,selJ=null;
-function setTool(t){$('tool').value=t;ov.classList.toggle('on',!!t&&!!S);if(t&&S)v.pause()}
+function setTool(t){$('tool').value=t;ov.classList.toggle('on',!!t&&!!S);if(t&&S)v.pause();const h=$('eh');h.style.display=t==='joint'?'block':'none';h.textContent=S?'🦴 Edit mode: press and drag any white circle to move that joint. Edits apply to this frame only.':'Analyze a video first, then drag the white circles.'}
 $('tool').onchange=()=>{setTool($('tool').value);$('tool').blur()};
 ov.onpointerdown=e=>{
   const t=$('tool').value;if(!S||!t)return;e.preventDefault();v.pause();
@@ -316,9 +396,9 @@ ov.onpointerdown=e=>{
 };
 function grabJ(x,y,e){
   if(!S.frames)return st.textContent='Skeleton editing needs AI pose mode (not Motion mode).';
-  const i=cur(),p=S.frames[i],r=ov.getBoundingClientRect();let bj=null,bd=30;
+  const i=cur(),p=S.frames[i],r=ov.getBoundingClientRect();let bj=null,bd=46;
   for(const j of JOINTS){const d=Math.hypot((p[j].x-x)*r.width,(p[j].y-y)*r.height);if(d<bd){bd=d;bj=j}}
-  if(bj===null)return;
+  if(bj===null){$('eh').textContent='No joint there. Press closer to a white circle.';return}
   S.orig=S.orig||{};if(!S.orig[i])S.orig[i]=p.map(q=>({...q}));
   S.frames[i]=p.map(q=>({...q}));selJ=bj;ov.setPointerCapture(e.pointerId);
 }
@@ -327,7 +407,7 @@ ov.onpointermove=e=>{
   else if(selJ!==null){const i=cur(),q=S.frames[i][selJ],[x,y]=pt(e);q.x=Math.max(0,Math.min(1,x));q.y=Math.max(0,Math.min(1,y));S.vec[i]=norm(S.frames[i])}
 };
 $('rs').onclick=()=>{const i=cur();if(S&&S.orig&&S.orig[i]){S.frames[i]=S.orig[i].map(q=>({...q}));S.vec[i]=norm(S.frames[i]);st.textContent=`Skeleton reset on frame ${i}.`}};
-ov.onpointerup=ov.onpointercancel=()=>{if(selJ!==null)st.textContent=`Skeleton edited on frame ${cur()}. Move a slider to recompute markers from your edits.`;stroke=null;selJ=null};
+ov.onpointerup=ov.onpointercancel=()=>{if(selJ!==null)st.textContent=`Done. Skeleton edited on frame ${cur()}. Move a slider to recompute markers from your edits.`;stroke=null;selJ=null};
 $('uz').onclick=()=>{if(S&&S.ann[cur()])S.ann[cur()].pop()};
 $('cl').onclick=()=>{if(S)delete S.ann[cur()]};
 $('k2').onclick=addKey;$('b2').onclick=addBrk;$('r2').onclick=rmMark;
@@ -341,7 +421,7 @@ $('zip').onclick=async()=>{
   const c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;const g=c.getContext('2d');v.pause();
   for(const [n,i] of idx.entries()){
     st.textContent=`Exporting frame ${n+1}/${idx.length}…`;
-    await seek(i/S.fps);g.drawImage(v,0,0);paintAnn(g,S.ann[i],c.width,c.height);
+    await seek(TT(i));g.drawImage(v,0,0);paintAnn(g,S.ann[i],c.width,c.height);
     if(S.cm[i]){const bh=c.width/14;g.fillStyle='rgba(0,0,0,.72)';g.fillRect(0,c.height-bh,c.width,bh);g.fillStyle='#fff';g.font=`${c.width/40}px system-ui,sans-serif`;g.textBaseline='middle';g.fillText(S.cm[i],12,c.height-bh/2)}
     const name={k:'key',b:'breakdown'}[typ.get(i)]||'note';
     z.file(`${name}_f${String(i).padStart(4,'0')}.png`,await new Promise(r=>c.toBlob(r,'image/png')));
@@ -359,10 +439,10 @@ cmBox.oninput=()=>{if(S&&cmF>=0){S.cm[cmF]=cmBox.value.trim();cmList()}};
 setInterval(()=>{cmBox.disabled=!S;if(S!==cmS){cmS=S;cmList()}if(!S){cmF=-1;cmBox.value='';return}const c=cur();if(c!==cmF&&document.activeElement!==cmBox){cmF=c;cmBox.value=S.cm[c]||''}},100);
 
 // exports
-const marks=()=>sorted().map(([i,t])=>({type:t==='k'?'key':'breakdown',frame:i,time:+(i/S.fps).toFixed(3),comment:S.cm[i]||''}));
+const marks=()=>sorted().map(([i,t])=>({type:t==='k'?'key':'breakdown',frame:i,time:+TT(i).toFixed(3),comment:S.cm[i]||''}));
 $('ex').onclick=()=>{
-  const f=i=>({frame:i,time:+(i/S.fps).toFixed(3)});
-  const j=JSON.stringify({fps:S.fps,keyPoses:[...S.keys].sort((a,b)=>a-b).map(f),breakdowns:[...S.brk].sort((a,b)=>a-b).map(f),comments:S.cm},null,2);
+  const f=i=>({frame:i,time:+TT(i).toFixed(3)});
+  const j=JSON.stringify({fps:S.fps,character:(S.act||0)+1,keyPoses:[...S.keys].sort((a,b)=>a-b).map(f),breakdowns:[...S.brk].sort((a,b)=>a-b).map(f),comments:S.cm},null,2);
   dl(URL.createObjectURL(new Blob([j],{type:'application/json'})),'poses.json');
 };
 $('csv').onclick=()=>{
@@ -380,10 +460,61 @@ $('sheet').onclick=()=>{
   all.forEach(([i,t],n)=>{
     const x=pad+(n%cols)*(tw+pad),y=pad+Math.floor(n/cols)*(th+lab+pad);
     g.drawImage(S.thumbs[i],x,y);g.lineWidth=3;g.strokeStyle=t==='k'?'#e5383b':'#f59e0b';g.strokeRect(x,y,tw,th);
-    g.fillStyle='#222';g.fillText(`${label(t)} f${i} · ${(i/S.fps).toFixed(2)}s`,x,y+th+16);
+    g.fillStyle='#222';g.fillText(`${label(t)} f${i} · ${TT(i).toFixed(2)}s`,x,y+th+16);
   });
   dl(c.toDataURL('image/png'),'pose_contact_sheet.png');
 };
+// ---- export every frame as an image sequence ----
+const loadZip=()=>window.JSZip?Promise.resolve(true):new Promise(ok=>{const q=document.createElement('script');q.src='https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';q.onload=()=>ok(true);q.onerror=()=>ok(false);document.head.append(q)});
+$('seq').onclick=async()=>{
+  if(!v.src||!v.duration){st.textContent='Choose a video first.';return}
+  if(!(await loadZip())){st.textContent='Could not load the ZIP library. Check your connection and try again.';return}
+  const fps=+$('sqf').value,[ra,rb]=range(),n=Math.max(1,Math.floor((rb-ra)*fps)),fmt=$('sqt').value,sc=+$('sqz').value,t0=v.currentTime;
+  const c=document.createElement('canvas');c.width=Math.round(v.videoWidth*sc);c.height=Math.round(v.videoHeight*sc);const g=c.getContext('2d'),z=new JSZip();
+  v.pause();abort=false;$('cancel').hidden=false;$('seq').disabled=true;
+  for(let i=0;i<n;i++){
+    if(abort){st.textContent='Export cancelled.';break}
+    st.textContent=`Exporting frame ${i+1}/${n}…`;
+    await seek(ra+i/fps);g.drawImage(v,0,0,c.width,c.height);
+    if(S){const k=Math.max(0,Math.min(S.n-1,Math.round((ra+i/fps-O())*S.fps)));
+      if($('sqs').checked&&S.frames)skel(g,S.frames[k],c.width,c.height,'#22c55e');
+      if($('sqd').checked){paintAnn(g,S.ann[k],c.width,c.height);
+        if(S.cm[k]){const bh=c.width/14;g.fillStyle='rgba(0,0,0,.72)';g.fillRect(0,c.height-bh,c.width,bh);g.fillStyle='#fff';g.font=`${c.width/40}px system-ui,sans-serif`;g.textBaseline='middle';g.fillText(S.cm[k],12,c.height-bh/2)}}}
+    z.file(`frame_${String(i+1).padStart(5,'0')}.${fmt==='jpeg'?'jpg':'png'}`,await new Promise(r=>c.toBlob(r,'image/'+fmt,.92)));
+  }
+  $('cancel').hidden=true;$('seq').disabled=false;
+  if(!abort){st.textContent='Packing the ZIP…';dl(URL.createObjectURL(await z.generateAsync({type:'blob',compression:'STORE'})),'image_sequence.zip');st.textContent=`Exported ${n} frames to image_sequence.zip.`}
+  await seek(t0);
+};
+
+// ---- auto-save and restore ----
+let curFile=null,videoSaved=false,lastSig='',storeOff=false;
+const sl=()=>({gap:$('gap').value,sm:$('sm').value,bt:$('bt').value});
+const sigI=()=>S?JSON.stringify([[...S.keys],[...S.brk],S.cm,S.ann,Object.keys(S.orig||{}).map(i=>S.frames?S.frames[i].reduce((a,q)=>a+q.x+q.y,0):0),sl(),$('sk').checked,trim.a,trim.b,S.act,S.cstate&&Object.values(S.cstate).map(c=>[[...c.keys],[...c.brk]])]):'';
+setInterval(async()=>{
+  if(!S||!curFile||storeOff)return;
+  const g=sigI();if(g===lastSig)return;lastSig=g;
+  if(!videoSaved){if(!(await Store.put('index:video',{blob:curFile,name:curFile.name||'video'}))){storeOff=true;Store.badge('⚠️ Could not auto-save (storage full or blocked)');return}videoSaved=true}
+  S.thumbUrls=S.thumbUrls||S.thumbs.map(c=>c.toDataURL('image/jpeg',.7));
+  const ok=await Store.put('index:state',{t:Date.now(),name:curFile.name||'video',fps:S.fps,t0:S.t0||0,tr:[trim.a,trim.b],n:S.n,pix:S.pix,frames:S.frames,vec:S.pix?S.vec:null,thumbUrls:S.thumbUrls,keys:[...S.keys],brk:[...S.brk],ann:S.ann,cm:S.cm,orig:S.orig||{},sl:sl(),sk:$('sk').checked,chars:S.chars||null,act:S.act||0,cstate:S.cstate||null,nch:$('nch').value});
+  Store.badge(ok?'💾 Saved '+new Date().toLocaleTimeString():'⚠️ Could not auto-save');
+},3000);
+async function restoreI(){
+  const [s0,vd]=await Promise.all([Store.get('index:state'),Store.get('index:video')]);
+  if(!s0||!vd){st.textContent='Could not find the saved video.';return}
+  curFile=vd.blob;videoSaved=true;v.src=URL.createObjectURL(vd.blob);
+  await new Promise(r=>{v.onloadedmetadata=()=>{ov.width=v.videoWidth;ov.height=v.videoHeight;r()}});
+  const thumbs=await Promise.all(s0.thumbUrls.map(u=>new Promise(r=>{const i=new Image();i.onload=()=>{const c=document.createElement('canvas');c.width=i.width;c.height=i.height;c.getContext('2d').drawImage(i,0,0);r(c)};i.src=u})));
+  for(const k of ['gap','sm','bt']){$(k).value=s0.sl[k];$({gap:'gv',sm:'sv',bt:'bv'}[k]).textContent=s0.sl[k]}
+  $('sk').checked=s0.sk;
+  trim={a:s0.tr?s0.tr[0]:0,b:s0.tr?s0.tr[1]:null};
+  S={fps:s0.fps,t0:s0.t0||0,n:s0.n,pix:s0.pix,frames:s0.frames,thumbs,vec:s0.pix?s0.vec:s0.frames.map(norm),keys:new Set(),brk:new Set(),ann:s0.ann,cm:s0.cm,orig:s0.orig,thumbUrls:s0.thumbUrls};
+  if(s0.chars){$('nch').value=s0.nch;S.chars=s0.chars;S.cvec=s0.chars.map(f=>f.map(norm));S.act=s0.act;S.frames=S.chars[S.act];S.vec=S.cvec[S.act];S.cstate=s0.cstate||{};fillChars()}else $('chw').style.display='none';
+  hist=[];compute();S.keys=new Set(s0.keys);S.brk=new Set(s0.brk);renderThumbs();
+  ['ak','ab','rm','ex','csv','sheet','cp','zip','pm','nm'].forEach(i=>$(i).disabled=false);goBtn.disabled=false;
+  st.textContent=`Done. Restored your saved work from ${new Date(s0.t).toLocaleString()}.`;lastSig=sigI();
+}
+Store.get('index:state').then(async s=>{if(s&&await Store.get('index:video'))Store.banner(`💾 Saved work found: ${s.name} · ${new Date(s.t).toLocaleString()}`,restoreI,()=>{Store.del('index:state');Store.del('index:video')})});
 </script>
 </body>
 </html>

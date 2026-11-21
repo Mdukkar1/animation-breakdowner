@@ -98,3 +98,10 @@ h1{cursor:pointer}
 #help p{display:flex;gap:12px;align-items:center;margin:0 0 8px;font-size:14px}
 #help kbd{min-width:76px;text-align:center;font-size:12px;padding:3px 8px}
 nav{flex-wrap:wrap}
+#savebadge{position:fixed;left:14px;bottom:max(14px,env(safe-area-inset-bottom,0px));z-index:97;padding:6px 12px;border-radius:999px;font-size:12px;background:rgba(0,0,0,.5);border:1px solid var(--line);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+#savebadge.pulse{animation:glow .9s ease}
+#restore{border-color:#22d3b7;background:rgba(34,211,183,.12)}
+
+#tbar{position:relative;height:14px;margin-top:10px;border-radius:99px;background:rgba(255,255,255,.12);cursor:pointer}
+#tbar i{position:absolute;top:0;bottom:0;border-radius:99px;background:linear-gradient(90deg,#22d3b7,#3b82f6)}
+#tbar u{position:absolute;top:-3px;bottom:-3px;width:3px;margin-left:-1px;border-radius:2px;background:#fff;box-shadow:0 0 8px #fff;pointer-events:none}
