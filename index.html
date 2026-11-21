@@ -34,6 +34,8 @@ video{max-width:100%;max-height:420px;display:block;border-radius:8px;background
 .hint{font-size:12px;opacity:.7;margin-top:6px}
 kbd{border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px}
 </style>
+<link rel="stylesheet" href="theme.css">
+<script src="theme.js" defer></script>
 </head>
 <body>
 <h1>Pose Marker</h1>
@@ -76,6 +78,7 @@ kbd{border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px}
   <div class="row" style="margin-top:8px">
     <button id="k2">+ Key here</button><button id="b2">+ Breakdown here</button><button id="r2">Remove marker here</button>
   </div>
+  <div class="row" style="margin-top:8px;align-items:flex-start"><b style="font-size:13px;padding-top:6px">💬 Comment on this frame</b><textarea id="cm" rows="2" placeholder="Write a note for the frame you are on (saved automatically)…" style="flex:1;min-width:220px"></textarea></div>
   <div class="hint">Shortcuts: <kbd>Space</kbd> play · <kbd>←</kbd><kbd>→</kbd> step · <kbd>[</kbd><kbd>]</kbd> markers · <kbd>K</kbd> key · <kbd>B</kbd> breakdown · <kbd>X</kbd> remove · <kbd>P</kbd> pen · <kbd>T</kbd> text · <kbd>E</kbd> eraser · <kbd>Esc</kbd> stop drawing</div>
 </div>
 
@@ -104,6 +107,8 @@ kbd{border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px}
     <button id="zip" disabled>Export frames ZIP</button>
   </div>
 </div>
+
+<div class="card"><b>💬 All comments</b><div id="cml" style="margin-top:8px;font-size:13px"></div></div>
 
 <div class="card"><div id="th"></div><div class="hint">Click a thumbnail to jump to it. Double-click to download the full frame as PNG.</div></div>
 
@@ -170,7 +175,7 @@ goBtn.onclick=async()=>{
   if(!pix){const first=frames.find(f=>f);
     if(!first){st.textContent="No person detected in this video.";goBtn.disabled=false;return}
     for(let i=0;i<n;i++)if(!frames[i])frames[i]=first;}
-  S={fps,n,pix,frames:pix?null:frames,thumbs,vec:pix?pv:frames.map(norm),keys:new Set(),brk:new Set(),ann:{}};
+  S={fps,n,pix,frames:pix?null:frames,thumbs,vec:pix?pv:frames.map(norm),keys:new Set(),brk:new Set(),ann:{},cm:{}};
   hist=[];compute();
   ['ak','ab','rm','ex','csv','sheet','cp','zip','pm','nm'].forEach(i=>$(i).disabled=false);goBtn.disabled=false;
   await seek(0);draw();
@@ -247,6 +252,7 @@ function draw(){
   t.strokeStyle='#888';t.beginPath();S.speed.forEach((s,i)=>{const y=h-8-(s/mx)*(h-30);i?t.lineTo(X(i),y):t.moveTo(X(i),y)});t.stroke();
   for(const i of S.brk){t.fillStyle='#f59e0b';t.fillRect(X(i)-1.5,10,3,h-20);t.beginPath();t.arc(X(i),10,5,0,7);t.fill()}
   for(const i of S.keys){t.fillStyle='#e5383b';t.fillRect(X(i)-2,6,4,h-12);t.beginPath();t.arc(X(i),8,6,0,7);t.fill()}
+  for(const i in S.cm)if(S.cm[i]){t.font='13px sans-serif';t.fillText('💬',X(+i)-7,h-2)}
   t.fillStyle='#2563eb';t.fillRect(X(cur())-1,0,2,h);
   const c=cur();$('info').textContent=`Frame ${c} / ${S.n-1} · ${(c/S.fps).toFixed(2)}s`;
   // loop between the markers around the playhead
@@ -322,23 +328,31 @@ $('zip').onclick=async()=>{
   for(const [n,i] of idx.entries()){
     st.textContent=`Exporting frame ${n+1}/${idx.length}…`;
     await seek(i/S.fps);g.drawImage(v,0,0);paintAnn(g,S.ann[i],c.width,c.height);
+    if(S.cm[i]){const bh=c.width/14;g.fillStyle='rgba(0,0,0,.72)';g.fillRect(0,c.height-bh,c.width,bh);g.fillStyle='#fff';g.font=`${c.width/40}px system-ui,sans-serif`;g.textBaseline='middle';g.fillText(S.cm[i],12,c.height-bh/2)}
     const name={k:'key',b:'breakdown'}[typ.get(i)]||'note';
     z.file(`${name}_f${String(i).padStart(4,'0')}.png`,await new Promise(r=>c.toBlob(r,'image/png')));
   }
-  z.file('poses.json',JSON.stringify({fps:S.fps,markers:marks(),annotations:S.ann},null,2));
+  z.file('poses.json',JSON.stringify({fps:S.fps,markers:marks(),annotations:S.ann,comments:S.cm},null,2));
   dl(URL.createObjectURL(await z.generateAsync({type:'blob'})),'pose_frames.zip');
   await seek(t0);st.textContent=`Exported ${idx.length} frames to pose_frames.zip.`;
 };
 
+// per-frame comments
+const cmBox=$('cm');let cmF=-1,cmS=null;
+function cmList(){const b=$('cml');if(!S){b.textContent='';return}const e=Object.entries(S.cm).filter(x=>x[1]).sort((a,b)=>a[0]-b[0]);b.textContent=e.length?'':'No comments yet. Pick any frame and write a note above.';for(const [i,t] of e){const d=document.createElement('div');d.className='cmi';d.textContent=`💬 f${i} · ${(i/S.fps).toFixed(2)}s — ${t}`;d.onclick=()=>{v.currentTime=i/S.fps};b.append(d)}}
+cmBox.onfocus=()=>v.pause();
+cmBox.oninput=()=>{if(S&&cmF>=0){S.cm[cmF]=cmBox.value.trim();cmList()}};
+setInterval(()=>{cmBox.disabled=!S;if(S!==cmS){cmS=S;cmList()}if(!S){cmF=-1;cmBox.value='';return}const c=cur();if(c!==cmF&&document.activeElement!==cmBox){cmF=c;cmBox.value=S.cm[c]||''}},100);
+
 // exports
-const marks=()=>sorted().map(([i,t])=>({type:t==='k'?'key':'breakdown',frame:i,time:+(i/S.fps).toFixed(3)}));
+const marks=()=>sorted().map(([i,t])=>({type:t==='k'?'key':'breakdown',frame:i,time:+(i/S.fps).toFixed(3),comment:S.cm[i]||''}));
 $('ex').onclick=()=>{
   const f=i=>({frame:i,time:+(i/S.fps).toFixed(3)});
-  const j=JSON.stringify({fps:S.fps,keyPoses:[...S.keys].sort((a,b)=>a-b).map(f),breakdowns:[...S.brk].sort((a,b)=>a-b).map(f)},null,2);
+  const j=JSON.stringify({fps:S.fps,keyPoses:[...S.keys].sort((a,b)=>a-b).map(f),breakdowns:[...S.brk].sort((a,b)=>a-b).map(f),comments:S.cm},null,2);
   dl(URL.createObjectURL(new Blob([j],{type:'application/json'})),'poses.json');
 };
 $('csv').onclick=()=>{
-  const c='type,frame,time_seconds\n'+marks().map(m=>`${m.type},${m.frame},${m.time}`).join('\n');
+  const c='type,frame,time_seconds,comment\n'+marks().map(m=>`${m.type},${m.frame},${m.time},"${m.comment.replace(/"/g,'""')}"`).join('\n');
   dl(URL.createObjectURL(new Blob([c],{type:'text/csv'})),'poses.csv');
 };
 $('cp').onclick=async()=>{
