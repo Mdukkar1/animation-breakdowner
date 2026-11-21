@@ -50,11 +50,12 @@ label{font-size:13px;display:flex;gap:6px;align-items:center}
   </div>
   <div class="row" style="margin-top:10px">
     <b style="font-size:13px">Draw</b>
-    <select id="tool"><option value="">Off</option><option value="pen">Pen</option><option value="text">Text</option><option value="erase">Eraser</option></select>
+    <select id="tool"><option value="">Off</option><option value="pen">Pen</option><option value="text">Text</option><option value="erase">Eraser</option><option value="joint">🦴 Edit skeleton</option></select>
     <input type="color" id="pc" value="#ffd166" title="Color">
     <label>Size <input type="range" id="pw" min="1" max="20" value="4"></label>
     <button id="iu">↩️ Undo drawing</button>
     <button id="ic">🧽 Clear drawings</button>
+    <button id="ir">🔄 Reset skeleton</button>
   </div>
   <div class="row" style="margin-top:10px;align-items:flex-start">
     <b style="font-size:13px;padding-top:6px">💬 Comment</b>
@@ -65,13 +66,13 @@ label{font-size:13px;display:flex;gap:6px;align-items:center}
     <button class="ex" id="e2" disabled>🦴 Save pose-only PNG (transparent)</button>
     <button class="ex" id="e3" disabled>📦 Save pose data JSON</button>
   </div>
-  <div class="hint">Angles are measured in degrees at each joint. Pink is the subject's right side, blue is the left, and the yellow dashed curve is the line of action from head to feet.</div>
+  <div class="hint">To fix the skeleton, choose <b>Edit skeleton</b> in the Draw menu and drag any joint; the angles update live. Angles are measured in degrees at each joint. Pink is the subject's right side, blue is the left, and the yellow dashed curve is the line of action from head to feet.</div>
 </div>
 
 <script type="module">
 const $=id=>document.getElementById(id);
 const cv=$('cv'),g=cv.getContext('2d'),st=$('st');
-let lm=null,im=null,P=null,ann=[],stroke=null,AN=[],GL=[];
+let lm=null,im=null,P=null,P0=null,sel=null,ann=[],stroke=null,AN=[],GL=[];
 const BONES=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],[27,31],[28,32],[27,29],[28,30]];
 const JOINTS=[0,11,12,13,14,15,16,23,24,25,26,27,28,29,30,31,32];
 
@@ -104,7 +105,7 @@ function detect(){
   if(!im)return;
   if(!lm){st.textContent="Image loaded. The pose model is still loading…";return}
   const r=lm.detect(im);P=(r.landmarks&&r.landmarks[0])||null;
-  if(P){analyze();st.textContent="Pose found. Toggle layers, draw, add a comment, or export.";['e1','e2','e3'].forEach(i=>$(i).disabled=false)}
+  if(P){P0=P.map(p=>({...p}));analyze();st.textContent="Pose found. Toggle layers, draw, add a comment, or export.";['e1','e2','e3'].forEach(i=>$(i).disabled=false)}
   else{$('angles').textContent='';st.textContent="No person detected. Try a clearer, full-body image.";['e2','e3'].forEach(i=>$(i).disabled=true);$('e1').disabled=false}
   render();
 }
@@ -141,7 +142,7 @@ function paint(g,o){
       for(const [a,b] of BONES){const A=xy(a),B=xy(b);
         g.beginPath();g.moveTo(...A);g.lineTo(...B);g.lineWidth=lw+3;g.strokeStyle='rgba(0,0,0,.55)';g.stroke();
         g.lineWidth=lw;g.strokeStyle=col(a,b);g.stroke()}
-      for(const j of JOINTS){const p=xy(j);g.beginPath();g.arc(p[0],p[1],W/170+2,0,7);g.fillStyle=j===0?'#fff':col(j,j);g.fill();g.lineWidth=1.5;g.strokeStyle='#000';g.stroke()}
+      for(const j of JOINTS){const p=xy(j);g.beginPath();g.arc(p[0],p[1],W/170+2,0,7);g.fillStyle=j===0?'#fff':col(j,j);g.fill();g.lineWidth=1.5;g.strokeStyle='#000';g.stroke();if(o.edit){g.beginPath();g.arc(p[0],p[1],W/60+4,0,7);g.lineWidth=2;g.strokeStyle='#fff';g.stroke()}}
     }
     if(o.loa){
       const pts=[xy(0),mid(11,12),mid(23,24),mid(27,28)];
@@ -156,24 +157,34 @@ function paint(g,o){
   }
   if(o.ann)paintAnn(g,ann,W,H);
 }
-const opts=()=>({bg:$('bg').value,sk:$('tsk').checked,loa:$('tloa').checked,an:$('tan').checked,ann:true});
+const opts=()=>({bg:$('bg').value,sk:$('tsk').checked,loa:$('tloa').checked,an:$('tan').checked,ann:true,edit:$('tool').value==='joint'});
 const render=()=>paint(g,opts());
 ['bg','tsk','tloa','tan'].forEach(id=>$(id).onchange=render);
 render();
 
 // drawing tools
 const pt=e=>{const r=cv.getBoundingClientRect();return[(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height]};
-$('tool').onchange=()=>{cv.classList.toggle('on',!!$('tool').value)};
+$('tool').onchange=()=>{cv.classList.toggle('on',!!$('tool').value);render()};
 cv.onpointerdown=e=>{
   const t=$('tool').value;if(!t)return;e.preventDefault();
   const [x,y]=pt(e),c=$('pc').value,w=+$('pw').value;
-  if(t==='pen'){stroke={t:'p',c,w,pts:[[x,y]]};ann.push(stroke);cv.setPointerCapture(e.pointerId)}
+  if(t==='joint')grab(x,y,e);
+  else if(t==='pen'){stroke={t:'p',c,w,pts:[[x,y]]};ann.push(stroke);cv.setPointerCapture(e.pointerId)}
   else if(t==='text'){const s=prompt('Text:');if(s)ann.push({t:'t',c,w,x,y,txt:s})}
   else{let bi=-1,bd=.05;ann.forEach((a,i)=>{const d=a.t==='p'?Math.min(...a.pts.map(q=>Math.hypot(q[0]-x,q[1]-y))):Math.hypot(a.x-x,a.y-y);if(d<bd){bd=d;bi=i}});if(bi>=0)ann.splice(bi,1)}
   render();
 };
-cv.onpointermove=e=>{if(stroke){stroke.pts.push(pt(e));render()}};
-cv.onpointerup=cv.onpointercancel=()=>{stroke=null};
+function grab(x,y,e){
+  if(!P)return;let bj=null,bd=28;const r=cv.getBoundingClientRect();
+  for(const j of JOINTS){const d=Math.hypot((P[j].x-x)*r.width,(P[j].y-y)*r.height);if(d<bd){bd=d;bj=j}}
+  if(bj!==null){sel=bj;cv.setPointerCapture(e.pointerId)}
+}
+cv.onpointermove=e=>{
+  if(stroke){stroke.pts.push(pt(e));render()}
+  else if(sel!==null){const [x,y]=pt(e);P[sel].x=Math.max(0,Math.min(1,x));P[sel].y=Math.max(0,Math.min(1,y));analyze();render()}
+};
+$('ir').onclick=()=>{if(P0){P=P0.map(p=>({...p}));analyze();render()}};
+cv.onpointerup=cv.onpointercancel=()=>{stroke=null;sel=null};
 $('iu').onclick=()=>{ann.pop();render()};
 $('ic').onclick=()=>{ann=[];render()};
 

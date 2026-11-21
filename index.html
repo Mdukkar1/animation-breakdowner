@@ -68,12 +68,13 @@ kbd{border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px}
   </div>
   <div class="row" style="margin-top:8px">
     <b style="font-size:13px">Draw on this frame</b>
-    <select id="tool"><option value="">Off</option><option value="pen">Pen</option><option value="text">Text</option><option value="erase">Eraser</option></select>
+    <select id="tool"><option value="">Off</option><option value="pen">Pen</option><option value="text">Text</option><option value="erase">Eraser</option><option value="joint">🦴 Edit skeleton</option></select>
     <input type="color" id="pc" value="#ff2d55" title="Color">
     <label>Size <input type="range" id="pw" min="1" max="20" value="4"></label>
     <label><input type="checkbox" id="sk" checked> Show skeleton</label>
     <button id="uz">Undo drawing</button>
     <button id="cl">Clear frame</button>
+    <button id="rs">🔄 Reset skeleton</button>
   </div>
   <div class="row" style="margin-top:8px">
     <button id="k2">+ Key here</button><button id="b2">+ Breakdown here</button><button id="r2">Remove marker here</button>
@@ -241,7 +242,7 @@ function draw(){
     const i=cur(),p=S.frames[i],W=ov.width,H=ov.height;
     if($('gh').checked){const prev=[...S.keys].filter(k=>k<i).pop();if(prev!==undefined)skel(g,S.frames[prev],W,H,'rgba(37,99,235,.7)',true)}
     const col=S.keys.has(i)?'#e5383b':S.brk.has(i)?'#f59e0b':'#22c55e';
-    skel(g,p,W,H,col);
+    skel(g,p,W,H,col);if($('tool').value==='joint')for(const j of JOINTS){g.beginPath();g.arc(p[j].x*W,p[j].y*H,W/70,0,7);g.fillStyle='#fff';g.fill();g.lineWidth=2;g.strokeStyle=col;g.stroke()}
     if(S.keys.has(i)||S.brk.has(i)){g.fillStyle=col;g.font=`bold ${W/25}px sans-serif`;g.fillText(S.keys.has(i)?'KEY':'BREAKDOWN',12,W/20)}
   }
   if(S)paintAnn(g,S.ann[cur()],ov.width,ov.height);
@@ -300,20 +301,33 @@ function paintAnn(g,list,W,H){
 }
 const pt=e=>{const r=ov.getBoundingClientRect();return[(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height]};
 const flist=()=>S.ann[cur()]||(S.ann[cur()]=[]);
-let stroke=null;
+let stroke=null,selJ=null;
 function setTool(t){$('tool').value=t;ov.classList.toggle('on',!!t&&!!S);if(t&&S)v.pause()}
 $('tool').onchange=()=>{setTool($('tool').value);$('tool').blur()};
 ov.onpointerdown=e=>{
   const t=$('tool').value;if(!S||!t)return;e.preventDefault();v.pause();
   const [x,y]=pt(e),c=$('pc').value,w=+$('pw').value;
-  if(t==='pen'){stroke={t:'p',c,w,pts:[[x,y]]};flist().push(stroke);ov.setPointerCapture(e.pointerId)}
+  if(t==='joint')grabJ(x,y,e);
+  else if(t==='pen'){stroke={t:'p',c,w,pts:[[x,y]]};flist().push(stroke);ov.setPointerCapture(e.pointerId)}
   else if(t==='text'){const s=prompt('Text for this frame:');if(s)flist().push({t:'t',c,w,x,y,txt:s})}
   else{const l=S.ann[cur()]||[];let bi=-1,bd=.05;
     l.forEach((a,i)=>{const d=a.t==='p'?Math.min(...a.pts.map(q=>Math.hypot(q[0]-x,q[1]-y))):Math.hypot(a.x-x,a.y-y);if(d<bd){bd=d;bi=i}});
     if(bi>=0)l.splice(bi,1)}
 };
-ov.onpointermove=e=>{if(stroke)stroke.pts.push(pt(e))};
-ov.onpointerup=ov.onpointercancel=()=>{stroke=null};
+function grabJ(x,y,e){
+  if(!S.frames)return st.textContent='Skeleton editing needs AI pose mode (not Motion mode).';
+  const i=cur(),p=S.frames[i],r=ov.getBoundingClientRect();let bj=null,bd=30;
+  for(const j of JOINTS){const d=Math.hypot((p[j].x-x)*r.width,(p[j].y-y)*r.height);if(d<bd){bd=d;bj=j}}
+  if(bj===null)return;
+  S.orig=S.orig||{};if(!S.orig[i])S.orig[i]=p.map(q=>({...q}));
+  S.frames[i]=p.map(q=>({...q}));selJ=bj;ov.setPointerCapture(e.pointerId);
+}
+ov.onpointermove=e=>{
+  if(stroke)stroke.pts.push(pt(e));
+  else if(selJ!==null){const i=cur(),q=S.frames[i][selJ],[x,y]=pt(e);q.x=Math.max(0,Math.min(1,x));q.y=Math.max(0,Math.min(1,y));S.vec[i]=norm(S.frames[i])}
+};
+$('rs').onclick=()=>{const i=cur();if(S&&S.orig&&S.orig[i]){S.frames[i]=S.orig[i].map(q=>({...q}));S.vec[i]=norm(S.frames[i]);st.textContent=`Skeleton reset on frame ${i}.`}};
+ov.onpointerup=ov.onpointercancel=()=>{if(selJ!==null)st.textContent=`Skeleton edited on frame ${cur()}. Move a slider to recompute markers from your edits.`;stroke=null;selJ=null};
 $('uz').onclick=()=>{if(S&&S.ann[cur()])S.ann[cur()].pop()};
 $('cl').onclick=()=>{if(S)delete S.ann[cur()]};
 $('k2').onclick=addKey;$('b2').onclick=addBrk;$('r2').onclick=rmMark;
@@ -332,7 +346,7 @@ $('zip').onclick=async()=>{
     const name={k:'key',b:'breakdown'}[typ.get(i)]||'note';
     z.file(`${name}_f${String(i).padStart(4,'0')}.png`,await new Promise(r=>c.toBlob(r,'image/png')));
   }
-  z.file('poses.json',JSON.stringify({fps:S.fps,markers:marks(),annotations:S.ann,comments:S.cm},null,2));
+  z.file('poses.json',JSON.stringify({fps:S.fps,markers:marks(),annotations:S.ann,comments:S.cm,skeletons:S.frames?Object.fromEntries(idx.map(i=>[i,S.frames[i].map(q=>[+q.x.toFixed(4),+q.y.toFixed(4)])])):null},null,2));
   dl(URL.createObjectURL(await z.generateAsync({type:'blob'})),'pose_frames.zip');
   await seek(t0);st.textContent=`Exported ${idx.length} frames to pose_frames.zip.`;
 };

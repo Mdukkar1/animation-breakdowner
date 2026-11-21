@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Face Image – Expression Analyzer for Animators</title>
+<style>
+:root{--bg:#f6f6f4;--fg:#1c1c1a;--card:#fff;--line:#ddd;--acc:#2563eb}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--fg);padding:max(16px,env(safe-area-inset-top,0px)) 16px max(16px,env(safe-area-inset-bottom,0px));max-width:980px;margin-inline:auto}
+h1{font-size:20px;margin:0 0 4px}
+p.sub{margin:0 0 14px;font-size:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.main{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start}
+button,select{font:inherit;padding:7px 12px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+button:disabled{opacity:.5}
+label{font-size:13px;display:flex;gap:6px;align-items:center}
+#cv{display:block;max-width:100%;touch-action:none}
+#cv.on{cursor:crosshair}
+#side{flex:1;min-width:240px}
+#bl{max-height:340px;overflow:auto;padding-right:6px;font-size:12px}
+.b{display:grid;grid-template-columns:130px 1fr 34px;gap:6px;align-items:center;margin-bottom:4px}
+.b i{display:block;height:8px;border-radius:4px;background:linear-gradient(90deg,#ff5f9e,#7c5cff);transition:width .3s}
+#mood{font-size:20px;font-weight:700;margin-bottom:8px}
+.ex{background:linear-gradient(135deg,#22d3b7,#3b82f6)!important;border-color:transparent!important;color:#04121f!important}
+.hint{font-size:12px;opacity:.7;margin-top:6px}
+#st{font-size:13px}
+</style>
+<link rel="stylesheet" href="theme.css">
+<script src="theme.js" defer></script>
+</head>
+<body>
+<h1>Face Image</h1>
+<nav></nav>
+<p class="sub">Upload a photo of a face. AI reads 52 expression channels, measures the smile, eyes, brows and head tilt, and draws the face lines. Everything runs in your browser; nothing is uploaded.</p>
+
+<div class="card row" id="drop">
+  <input type="file" id="file" accept="image/*">
+  <span id="st">Loading face model…</span>
+  <div class="hint" style="flex:0 0 100%;margin:0">You can also drop an image here or paste one with Ctrl+V.</div>
+</div>
+
+<div class="card">
+  <div class="main">
+    <canvas id="cv" width="560" height="400"></canvas>
+    <div id="side">
+      <div id="mood">Choose a photo</div>
+      <div id="chips"></div>
+      <b style="font-size:13px">All expression channels (strongest first)</b>
+      <div id="bl" style="margin-top:8px"></div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="row">
+    <label>🎨 Background <select id="bg"><option value="img">Photo</option><option value="dark">Dark</option><option value="light">Light</option><option value="none">Transparent</option></select></label>
+    <label><input type="checkbox" id="tln" checked> 🎭 Face lines</label>
+    <label><input type="checkbox" id="tpts"> ✨ All 478 points</label>
+  </div>
+  <div class="row" style="margin-top:10px">
+    <b style="font-size:13px">Draw</b>
+    <select id="tool"><option value="">Off</option><option value="pen">Pen</option><option value="text">Text</option><option value="erase">Eraser</option></select>
+    <input type="color" id="pc" value="#ffd166" title="Color">
+    <label>Size <input type="range" id="pw" min="1" max="20" value="4"></label>
+    <button id="iu">↩️ Undo drawing</button>
+    <button id="ic">🧽 Clear drawings</button>
+  </div>
+  <div class="row" style="margin-top:10px;align-items:flex-start">
+    <b style="font-size:13px;padding-top:6px">💬 Comment</b>
+    <textarea id="cm" rows="2" placeholder="Write a note about this expression (saved in the JSON export)…" style="flex:1;min-width:220px"></textarea>
+  </div>
+  <div class="row" style="margin-top:10px">
+    <button class="ex" id="e1" disabled>🖼️ Save image PNG</button>
+    <button class="ex" id="e2" disabled>🎭 Save face-lines PNG (transparent)</button>
+    <button class="ex" id="e3" disabled>📦 Save expression JSON</button>
+    <button class="ex" id="e4" disabled>📊 Save expression CSV</button>
+  </div>
+  <div class="hint">Percentages come from the AI expression values (0 to 100%). The mood label is a rough guess from those values, not a diagnosis. Head turn is an estimate.</div>
+</div>
+
+<script type="module">
+const $=id=>document.getElementById(id);
+const cv=$('cv'),g=cv.getContext('2d'),st=$('st');
+let fl=null,im=null,F=null,BS=null,CONN=[],ann=[],stroke=null,MT=[],MOOD='';
+const COLS=['#ff5f9e','#4cc9f0','#4cc9f0','#ffd166','#ffd166','#ffffff'];
+
+(async()=>{
+  try{
+    const {FaceLandmarker,FilesetResolver}=await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs");
+    const fs=await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+    fl=await FaceLandmarker.createFromOptions(fs,{baseOptions:{modelAssetPath:"https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"},runningMode:"IMAGE",numFaces:1,outputFaceBlendshapes:true});
+    CONN=[FaceLandmarker.FACE_LANDMARKS_LIPS,FaceLandmarker.FACE_LANDMARKS_LEFT_EYE,FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE,FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW,FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW,FaceLandmarker.FACE_LANDMARKS_FACE_OVAL];
+    st.textContent=im?"Model ready.":"Model ready. Choose a photo.";
+    if(im)detect();
+  }catch(e){st.textContent="The face model could not load. Check your internet connection and reload.";console.error(e)}
+})();
+
+const P=i=>[F[i].x*cv.width,F[i].y*cv.height];
+function analyze(){
+  const b=k=>BS[k]||0,av=(a,c)=>(b(a)+b(c))/2;
+  const sm=av('mouthSmileLeft','mouthSmileRight'),jo=b('jawOpen'),eo=1-av('eyeBlinkLeft','eyeBlinkRight'),
+        br=(b('browInnerUp')+av('browOuterUpLeft','browOuterUpRight'))/2,bd=av('browDownLeft','browDownRight'),
+        fr=av('mouthFrownLeft','mouthFrownRight'),sym=1-Math.abs(b('mouthSmileLeft')-b('mouthSmileRight')),
+        pr=Math.max(av('mouthPressLeft','mouthPressRight'),av('noseSneerLeft','noseSneerRight'));
+  const e1=P(33),e2=P(263),nt=P(1),ed=Math.hypot(e2[0]-e1[0],e2[1]-e1[1])||1;
+  const roll=Math.round(Math.atan2(e2[1]-e1[1],e2[0]-e1[0])*180/Math.PI),turn=Math.round((nt[0]-(e1[0]+e2[0])/2)/ed*90);
+  MT=[['Smile',Math.round(sm*100)+'%'],['Mouth open',Math.round(jo*100)+'%'],['Eyes open',Math.round(eo*100)+'%'],['Brows raised',Math.round(br*100)+'%'],
+      ['Brows lowered',Math.round(bd*100)+'%'],['Smile symmetry',Math.round(sym*100)+'%'],['Head tilt',roll+'°'],['Head turn (rough)',turn+'°']];
+  MOOD=jo>.25&&br>.3?'😮 Surprised':sm>.35?'😄 Happy':(fr>.25||(br>.3&&fr>.1))?'😟 Sad or worried':(bd>.4&&pr>.2)?'😠 Angry':'😐 Neutral';
+  $('mood').textContent=MOOD+'  (rough guess)';
+  $('chips').innerHTML=MT.map(m=>`<span class="chip">${m[0]} ${m[1]}</span>`).join('');
+  const all=Object.entries(BS).filter(x=>x[0]!=='_neutral').sort((a,b)=>b[1]-a[1]);
+  $('bl').innerHTML=all.map(([n,s])=>`<div class="b"><span>${n}</span><i style="width:${Math.round(s*100)}%"></i><span>${s.toFixed(2)}</span></div>`).join('');
+}
+
+function detect(){
+  if(!im)return;
+  if(!fl){st.textContent="Image loaded. The face model is still loading…";return}
+  const r=fl.detect(im),bc=r.faceBlendshapes&&r.faceBlendshapes[0];
+  F=(r.faceLandmarks&&r.faceLandmarks[0])||null;BS=bc?Object.fromEntries(bc.categories.map(c=>[c.categoryName,c.score])):null;
+  const ok=F&&BS;
+  if(ok){analyze();st.textContent="Done. Face found. Check the bars, draw on the photo, or export."}
+  else{$('mood').textContent='No face found';$('chips').textContent='';$('bl').textContent='';st.textContent="No face detected. Try a clear, front-facing photo."}
+  ['e2','e3','e4'].forEach(i=>$(i).disabled=!ok);$('e1').disabled=false;
+  render();
+}
+function load(f){
+  if(!f||!f.type.startsWith('image/'))return;
+  const i=new Image();
+  i.onload=()=>{im=i;const s=Math.min(1,1400/Math.max(i.naturalWidth,i.naturalHeight));
+    cv.width=Math.round(i.naturalWidth*s);cv.height=Math.round(i.naturalHeight*s);ann=[];F=null;$('cm').value='';detect()};
+  i.src=URL.createObjectURL(f);
+}
+$('file').onchange=e=>load(e.target.files[0]);
+const dz=$('drop');
+dz.ondragover=e=>{e.preventDefault();dz.classList.add('over')};dz.ondragleave=()=>dz.classList.remove('over');
+dz.ondrop=e=>{e.preventDefault();dz.classList.remove('over');load(e.dataTransfer.files[0])};
+document.addEventListener('paste',e=>{const f=[...(e.clipboardData?.files||[])][0];if(f)load(f)});
+
+function paintAnn(g,list,W,H){
+  g.save();g.lineCap=g.lineJoin='round';
+  for(const a of list){g.strokeStyle=g.fillStyle=a.c;
+    if(a.t==='p'){g.lineWidth=a.w*W/640;g.beginPath();a.pts.forEach(([x,y],i)=>i?g.lineTo(x*W,y*H):g.moveTo(x*W,y*H));if(a.pts.length===1)g.lineTo(a.pts[0][0]*W+.1,a.pts[0][1]*H);g.stroke()}
+    else{g.font=`bold ${(a.w*2+12)*W/640}px system-ui,sans-serif`;g.textBaseline='top';g.shadowColor='#000';g.shadowBlur=4;g.fillText(a.txt,a.x*W,a.y*H);g.shadowBlur=0}}
+  g.restore();
+}
+function paint(g,o){
+  const W=cv.width,H=cv.height;g.clearRect(0,0,W,H);
+  if(o.bg==='img'&&im)g.drawImage(im,0,0,W,H);
+  else if(o.bg==='dark'||o.bg==='light'){g.fillStyle=o.bg==='dark'?'#101018':'#f2f2f2';g.fillRect(0,0,W,H)}
+  if(F){
+    g.save();g.lineCap='round';
+    if(o.ln){g.lineWidth=Math.max(1.5,W/380);g.shadowColor='rgba(0,0,0,.8)';g.shadowBlur=3;
+      CONN.forEach((list,k)=>{g.strokeStyle=COLS[k];for(const {start,end} of list){const a=P(start),b=P(end);g.beginPath();g.moveTo(...a);g.lineTo(...b);g.stroke()}})}
+    if(o.pts){g.fillStyle='#ffd166';for(let i=0;i<F.length;i++){const p=P(i);g.fillRect(p[0]-1,p[1]-1,2,2)}}
+    g.restore();
+  }
+  if(o.ann)paintAnn(g,ann,W,H);
+}
+const render=()=>paint(g,{bg:$('bg').value,ln:$('tln').checked,pts:$('tpts').checked,ann:true});
+['bg','tln','tpts'].forEach(id=>$(id).onchange=render);
+render();
+
+const pt=e=>{const r=cv.getBoundingClientRect();return[(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height]};
+$('tool').onchange=()=>cv.classList.toggle('on',!!$('tool').value);
+cv.onpointerdown=e=>{
+  const t=$('tool').value;if(!t)return;e.preventDefault();
+  const [x,y]=pt(e),c=$('pc').value,w=+$('pw').value;
+  if(t==='pen'){stroke={t:'p',c,w,pts:[[x,y]]};ann.push(stroke);cv.setPointerCapture(e.pointerId)}
+  else if(t==='text'){const s=prompt('Text:');if(s)ann.push({t:'t',c,w,x,y,txt:s})}
+  else{let bi=-1,bd=.05;ann.forEach((a,i)=>{const d=a.t==='p'?Math.min(...a.pts.map(q=>Math.hypot(q[0]-x,q[1]-y))):Math.hypot(a.x-x,a.y-y);if(d<bd){bd=d;bi=i}});if(bi>=0)ann.splice(bi,1)}
+  render();
+};
+cv.onpointermove=e=>{if(stroke){stroke.pts.push(pt(e));render()}};
+cv.onpointerup=cv.onpointercancel=()=>{stroke=null};
+$('iu').onclick=()=>{ann.pop();render()};
+$('ic').onclick=()=>{ann=[];render()};
+
+const dl=(h,n)=>{const a=document.createElement('a');a.href=h;a.download=n;a.click()};
+const blob=(t,type)=>URL.createObjectURL(new Blob([t],{type}));
+$('e1').onclick=()=>dl(cv.toDataURL('image/png'),'face_image.png');
+$('e2').onclick=()=>{const c=document.createElement('canvas');c.width=cv.width;c.height=cv.height;paint(c.getContext('2d'),{bg:'none',ln:true,pts:$('tpts').checked,ann:false});dl(c.toDataURL('image/png'),'face_lines.png')};
+$('e3').onclick=()=>dl(blob(JSON.stringify({width:cv.width,height:cv.height,comment:$('cm').value,mood:MOOD,measurements:Object.fromEntries(MT),blendshapes:BS,
+  landmarks:F.map(p=>[+p.x.toFixed(4),+p.y.toFixed(4),+p.z.toFixed(4)])},null,2),'application/json'),'face_expression.json');
+$('e4').onclick=()=>dl(blob('name,value\n'+Object.entries(BS).map(([n,s])=>`${n},${s.toFixed(4)}`).join('\n'),'text/csv'),'face_expression.csv');
+</script>
+</body>
+</html>
