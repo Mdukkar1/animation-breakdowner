@@ -28,7 +28,7 @@ label{font-size:13px;display:flex;gap:6px;align-items:center}
 <body>
 <h1>Image Pose</h1>
 <nav></nav>
-<p class="sub">Upload a photo of a person. AI finds the skeleton, joint angles and line of action so you can build and study a pose. Everything runs in your browser; nothing is uploaded.</p>
+<p class="sub">Upload a photo of one or more people (up to 4). AI finds the skeleton, joint angles and line of action so you can build and study a pose. Everything runs in your browser; nothing is uploaded.</p>
 
 <div class="card row" id="drop">
   <input type="file" id="file" accept="image/*">
@@ -44,6 +44,7 @@ label{font-size:13px;display:flex;gap:6px;align-items:center}
 <div class="card">
   <div class="row">
     <label>🎨 Background <select id="bg"><option value="img">Photo</option><option value="dark">Dark</option><option value="light">Light</option><option value="none">Transparent</option></select></label>
+    <label style="display:none">👥 Person <select id="pp"></select></label>
     <label><input type="checkbox" id="tsk" checked> 🦴 Skeleton</label>
     <label><input type="checkbox" id="tloa" checked> 〰️ Line of action</label>
     <label><input type="checkbox" id="tan" checked> 📐 Joint angles</label>
@@ -72,7 +73,7 @@ label{font-size:13px;display:flex;gap:6px;align-items:center}
 <script type="module">
 const $=id=>document.getElementById(id);
 const cv=$('cv'),g=cv.getContext('2d'),st=$('st');
-let lm=null,im=null,P=null,P0=null,sel=null,ann=[],stroke=null,AN=[],GL=[];
+let lm=null,im=null,P=null,P0=null,ALL=[],P0s=[],act=0,sel=null,ann=[],stroke=null,AN=[],GL=[];
 const BONES=[[11,12],[11,13],[13,15],[12,14],[14,16],[11,23],[12,24],[23,24],[23,25],[25,27],[24,26],[26,28],[27,31],[28,32],[27,29],[28,30]];
 const JOINTS=[0,11,12,13,14,15,16,23,24,25,26,27,28,29,30,31,32];
 
@@ -80,7 +81,7 @@ const JOINTS=[0,11,12,13,14,15,16,23,24,25,26,27,28,29,30,31,32];
   try{
     const {PoseLandmarker,FilesetResolver}=await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs");
     const fs=await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
-    lm=await PoseLandmarker.createFromOptions(fs,{baseOptions:{modelAssetPath:"https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task"},runningMode:"IMAGE",numPoses:1});
+    lm=await PoseLandmarker.createFromOptions(fs,{baseOptions:{modelAssetPath:"https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_full/float16/latest/pose_landmarker_full.task"},runningMode:"IMAGE",numPoses:4});
     st.textContent=im?"Model ready.":"Model ready. Choose an image.";
     if(im)detect();
   }catch(e){st.textContent="The pose model could not load. Check your internet connection and reload.";console.error(e)}
@@ -93,20 +94,24 @@ const ang=(a,b,c)=>{const A=xy(a),B=xy(b),C=xy(c),u=[A[0]-B[0],A[1]-B[1]],w=[C[0
   return Math.round(Math.acos(Math.max(-1,Math.min(1,(u[0]*w[0]+u[1]*w[1])/((Math.hypot(...u)*Math.hypot(...w))||1))))*180/Math.PI)};
 const tilt=(a,b)=>Math.round(Math.atan2(b[1]-a[1],b[0]-a[0])*180/Math.PI);
 
-function analyze(){
+function calc(){
   const sm=mid(11,12),hm=mid(23,24);
-  AN=[['Left elbow',13,ang(11,13,15)],['Right elbow',14,ang(12,14,16)],['Left shoulder',11,ang(23,11,13)],['Right shoulder',12,ang(24,12,14)],
+  const AN=[['Left elbow',13,ang(11,13,15)],['Right elbow',14,ang(12,14,16)],['Left shoulder',11,ang(23,11,13)],['Right shoulder',12,ang(24,12,14)],
       ['Left hip',23,ang(11,23,25)],['Right hip',24,ang(12,24,26)],['Left knee',25,ang(23,25,27)],['Right knee',26,ang(24,26,28)]];
-  GL=[['Shoulder line tilt',tilt(xy(11),xy(12))],['Hip line tilt',tilt(xy(23),xy(24))],['Spine lean from vertical',Math.round(Math.atan2(sm[0]-hm[0],hm[1]-sm[1])*180/Math.PI)]];
-  $('angles').innerHTML=AN.map(a=>`<span class="chip">${a[0]} ${a[2]}°</span>`).concat(GL.map(a=>`<span class="chip">${a[0]} ${a[1]}°</span>`)).join('');
+  const GL=[['Shoulder line tilt',tilt(xy(11),xy(12))],['Hip line tilt',tilt(xy(23),xy(24))],['Spine lean from vertical',Math.round(Math.atan2(sm[0]-hm[0],hm[1]-sm[1])*180/Math.PI)]];
+  return{AN,GL};
+}
+function analyze(){
+  ({AN,GL}=calc());
+  $('angles').innerHTML=(ALL.length>1?'<div style="margin-bottom:6px"><b>Person '+(act+1)+'</b></div>':'')+AN.map(a=>`<span class="chip">${a[0]} ${a[2]}°</span>`).concat(GL.map(a=>`<span class="chip">${a[0]} ${a[1]}°</span>`)).join('');
 }
 
 function detect(){
   if(!im)return;
   if(!lm){st.textContent="Image loaded. The pose model is still loading…";return}
-  const r=lm.detect(im);P=(r.landmarks&&r.landmarks[0])||null;
-  if(P){P0=P.map(p=>({...p}));analyze();st.textContent="Pose found. Toggle layers, draw, add a comment, or export.";['e1','e2','e3'].forEach(i=>$(i).disabled=false)}
-  else{$('angles').textContent='';st.textContent="No person detected. Try a clearer, full-body image.";['e2','e3'].forEach(i=>$(i).disabled=true);$('e1').disabled=false}
+  const r=lm.detect(im);ALL=(r.landmarks||[]).slice().sort((a,b)=>(a[11].x+a[12].x+a[23].x+a[24].x)-(b[11].x+b[12].x+b[23].x+b[24].x));act=0;P=ALL[0]||null;
+  if(P){P0s=ALL.map(L=>L.map(p=>({...p})));fillPP();analyze();st.textContent="Pose found"+(ALL.length>1?` (${ALL.length} people, left to right)`:"")+". Toggle layers, draw, add a comment, or export.";['e1','e2','e3'].forEach(i=>$(i).disabled=false)}
+  else{fillPP();$('angles').textContent='';st.textContent="No person detected. Try a clearer, full-body image.";['e2','e3'].forEach(i=>$(i).disabled=true);$('e1').disabled=false}
   render();
 }
 
@@ -114,7 +119,7 @@ function load(f){
   if(!f||!f.type.startsWith('image/'))return;
   const i=new Image();
   i.onload=()=>{im=i;const s=Math.min(1,1600/Math.max(i.naturalWidth,i.naturalHeight));
-    cv.width=Math.round(i.naturalWidth*s);cv.height=Math.round(i.naturalHeight*s);ann=[];P=null;$('cm').value='';detect()};
+    cv.width=Math.round(i.naturalWidth*s);cv.height=Math.round(i.naturalHeight*s);ann=[];P=null;ALL=[];$('cm').value='';detect()};
   i.src=URL.createObjectURL(f);
 }
 $('file').onchange=e=>load(e.target.files[0]);
@@ -135,8 +140,10 @@ function paint(g,o){
   const W=cv.width,H=cv.height;g.clearRect(0,0,W,H);
   if(o.bg==='img'&&im)g.drawImage(im,0,0,W,H);
   else if(o.bg==='dark'||o.bg==='light'){g.fillStyle=o.bg==='dark'?'#101018':'#f2f2f2';g.fillRect(0,0,W,H)}
-  if(P){
-    g.save();g.lineCap=g.lineJoin='round';
+  const keepP=P;
+  ALL.forEach((L,k)=>{
+    P=L;const AN2=k===act?AN:calc().AN;
+    g.save();g.lineCap=g.lineJoin='round';g.globalAlpha=(k!==act&&ALL.length>1)?.8:1;
     if(o.sk){
       const lw=Math.max(3,W/220);
       for(const [a,b] of BONES){const A=xy(a),B=xy(b);
@@ -151,10 +158,12 @@ function paint(g,o){
     }
     if(o.an){
       g.font=`bold ${Math.max(12,W/55)}px system-ui,sans-serif`;g.lineWidth=4;g.strokeStyle='#000';g.fillStyle='#fff';
-      for(const [n,j,a] of AN){const p=xy(j),t=a+'°';g.strokeText(t,p[0]+10,p[1]-8);g.fillText(t,p[0]+10,p[1]-8)}
+      for(const [n,j,a] of AN2){const p=xy(j),t=a+'°';g.strokeText(t,p[0]+10,p[1]-8);g.fillText(t,p[0]+10,p[1]-8)}
     }
+    if(ALL.length>1){const h=xy(0);g.font=`bold ${Math.max(14,W/40)}px system-ui,sans-serif`;g.lineWidth=4;g.strokeStyle='#000';g.fillStyle=k===act?'#ffd166':'#fff';g.strokeText(k+1,h[0]-6,h[1]-W/30);g.fillText(k+1,h[0]-6,h[1]-W/30)}
     g.restore();
-  }
+  });
+  P=keepP;
   if(o.ann)paintAnn(g,ann,W,H);
 }
 const opts=()=>({bg:$('bg').value,sk:$('tsk').checked,loa:$('tloa').checked,an:$('tan').checked,ann:true,edit:$('tool').value==='joint'});
@@ -175,15 +184,17 @@ cv.onpointerdown=e=>{
   render();
 };
 function grab(x,y,e){
-  if(!P)return;let bj=null,bd=28;const r=cv.getBoundingClientRect();
-  for(const j of JOINTS){const d=Math.hypot((P[j].x-x)*r.width,(P[j].y-y)*r.height);if(d<bd){bd=d;bj=j}}
-  if(bj!==null){sel=bj;cv.setPointerCapture(e.pointerId)}
+  let bj=null,bk=0,bd=28;const r=cv.getBoundingClientRect();
+  ALL.forEach((L,k)=>{for(const j of JOINTS){const d=Math.hypot((L[j].x-x)*r.width,(L[j].y-y)*r.height);if(d<bd){bd=d;bj=j;bk=k}}});
+  if(bj!==null){act=bk;P=ALL[bk];$('pp').value=bk;analyze();sel=bj;cv.setPointerCapture(e.pointerId)}
 }
+function fillPP(){const q=$('pp');q.innerHTML=ALL.map((_,k)=>`<option value="${k}">Person ${k+1}</option>`).join('');q.value=act;q.parentNode.style.display=ALL.length>1?'':'none'}
+$('pp').onchange=()=>{act=+$('pp').value;P=ALL[act];analyze();render()};
 cv.onpointermove=e=>{
   if(stroke){stroke.pts.push(pt(e));render()}
   else if(sel!==null){const [x,y]=pt(e);P[sel].x=Math.max(0,Math.min(1,x));P[sel].y=Math.max(0,Math.min(1,y));analyze();render()}
 };
-$('ir').onclick=()=>{if(P0){P=P0.map(p=>({...p}));analyze();render()}};
+$('ir').onclick=()=>{if(P0s[act]){P=ALL[act]=P0s[act].map(p=>({...p}));analyze();render()}};
 cv.onpointerup=cv.onpointercancel=()=>{stroke=null;sel=null};
 $('iu').onclick=()=>{ann.pop();render()};
 $('ic').onclick=()=>{ann=[];render()};
@@ -199,6 +210,7 @@ $('e2').onclick=()=>{
 $('e3').onclick=()=>{
   const j=JSON.stringify({width:cv.width,height:cv.height,comment:$('cm').value,
     angles:Object.fromEntries(AN.map(a=>[a[0],a[2]]).concat(GL)),
+    people:ALL.map(L=>L.map(p=>[+p.x.toFixed(4),+p.y.toFixed(4)])),
     landmarks:P.map((p,i)=>({i,x:+p.x.toFixed(4),y:+p.y.toFixed(4),z:+p.z.toFixed(4),visibility:+(p.visibility||0).toFixed(2)}))},null,2);
   dl(URL.createObjectURL(new Blob([j],{type:'application/json'})),'pose_data.json');
 };
