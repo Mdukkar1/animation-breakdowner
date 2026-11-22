@@ -151,7 +151,7 @@ async function detect(){
   render();
 }
 function load(f){
-  if(!f||!f.type.startsWith('image/'))return;curBlob=f;imgSaved=false;
+  if(!f||!f.type.startsWith('image/'))return;curBlob=f;imgSaved=false;Store.lib.add(f);
   const i=new Image();
   i.onload=()=>{im=i;const s=Math.min(1,1400/Math.max(i.naturalWidth,i.naturalHeight));
     cv.width=Math.round(i.naturalWidth*s);cv.height=Math.round(i.naturalHeight*s);ann=[];F=null;$('cm').value='';detect()};
@@ -232,6 +232,7 @@ async function restoreFI(){
   i.src=URL.createObjectURL(d.blob);
 }
 Store.get('faceimage:state').then(async s=>{if(s&&await Store.get('faceimage:img'))Store.banner(`💾 Saved work found: ${s.name} · ${new Date(s.t).toLocaleString()}`,restoreFI,()=>{Store.del('faceimage:state');Store.del('faceimage:img')})});
+Store.library('image',load);
 </script>
 </body>
 </html>

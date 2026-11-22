@@ -20,7 +20,7 @@ for(const [id,ic] of Object.entries({gh:'👻',lp:'🔁',sk:$('gh')?'🦴':'🎭
   const c=$(id);if(c){const s=document.createElement('span');s.textContent=ic;c.parentNode.insertBefore(s,c)}}
 
 const pg=location.pathname.split('/').pop()||'index.html',on=p=>pg===p?'on':'',nav=document.querySelector('nav');
-if(nav)nav.innerHTML=`<a href="index.html" class="${on('index.html')}">🧍 Body poses</a><a href="face.html" class="${on('face.html')}">🙂 Face breakdown</a><a href="image.html" class="${on('image.html')}">🖼️ Image pose</a><a href="faceimage.html" class="${on('faceimage.html')}">😀 Face image</a>`;
+if(nav)nav.innerHTML=`<a href="index.html" class="${on('index.html')}">🧍 Body poses</a><a href="face.html" class="${on('face.html')}">🙂 Face breakdown</a><a href="image.html" class="${on('image.html')}">🖼️ Image pose</a><a href="faceimage.html" class="${on('faceimage.html')}">😀 Face image</a><a href="cutter.html" class="${on('cutter.html')}">✂️ Video cutter</a>`;
 
 const tips=['Key poses tell the story. Breakdowns tell how it moves.','Fewer, stronger keys read better than many weak ones.','Slow playback to 0.25× to find the real timing.','Wide spacing between frames feels fast. Tight spacing feels slow.','Good breakdowns decide the arc between two keys.','Press K or B to drop a marker without leaving the keyboard.'];
 const sub=document.querySelector('p.sub'),tip=document.createElement('div');tip.className='tip';
@@ -100,6 +100,7 @@ document.body.append(th);setHue(HU.includes(saved)?saved:0);
 // help panel
 const HELP={'index.html':[['Space','Play or pause'],['← →','Step one frame'],['[  ]','Previous or next marker'],['K','Add a key pose'],['I  O','Set cut start and end'],['B','Add a breakdown'],['X','Remove marker'],['Z','Undo'],['P  T  E','Pen, text, eraser'],['Esc','Stop drawing'],['?','Show this help']],
  'face.html':[['Space','Play or pause'],['← →','Step one frame'],['[  ]','Previous or next marker'],['K','Add a key expression'],['B','Add a breakdown'],['X','Remove marker'],['Z','Undo'],['?','Show this help']],
+ 'cutter.html':[['Space','Play or pause'],['I  O','Set the start and end of the cut'],['← →','Step one frame'],['Drag','Move the pink handles on the bar'],['?','Show this help']],
  'faceimage.html':[['Ctrl+V','Paste a photo'],['Drop','Drag a photo onto the top box'],['Draw','Pick Pen, Text or Eraser, then click the photo'],['?','Show this help']],
  'image.html':[['Ctrl+V','Paste an image'],['Drop','Drag an image onto the top box'],['Draw','Pick Pen, Text or Eraser, then click the picture'],['?','Show this help']]};
 const hp=document.createElement('div');hp.id='help';

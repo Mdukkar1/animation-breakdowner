@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Video Cutter – Cut and Keep the Part You Want</title>
+<style>
+:root{--bg:#f6f6f4;--fg:#1c1c1a;--card:#fff;--line:#ddd;--acc:#2563eb}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,sans-serif;background:var(--bg);color:var(--fg);padding:max(16px,env(safe-area-inset-top,0px)) 16px max(16px,env(safe-area-inset-bottom,0px));max-width:980px;margin-inline:auto}
+h1{font-size:20px;margin:0 0 4px}
+p.sub{margin:0 0 14px;font-size:14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+button,select,input[type=number]{font:inherit;padding:7px 12px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--fg);cursor:pointer}
+input[type=number]{width:92px;cursor:text}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+button:disabled{opacity:.5}
+label{font-size:13px;display:flex;gap:6px;align-items:center}
+video{display:block;max-width:100%;max-height:420px;border-radius:8px;background:#000}
+#trk{position:relative;height:42px;margin:14px 0 4px;border-radius:10px;background:rgba(127,127,127,.25);cursor:pointer;touch-action:none;user-select:none}
+#sel{position:absolute;top:0;bottom:0;border-radius:6px;background:linear-gradient(90deg,#22d3b7,#3b82f6);opacity:.85}
+#ph{position:absolute;top:-4px;bottom:-4px;width:3px;margin-left:-1px;background:#fff;border-radius:2px;box-shadow:0 0 8px #fff;pointer-events:none}
+.hd{position:absolute;top:-5px;bottom:-5px;width:16px;margin-left:-8px;border-radius:6px;background:#ff5f9e;border:2px solid #fff;cursor:ew-resize;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+.clip{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 10px;margin-bottom:6px;border-radius:10px;background:rgba(127,127,127,.15)}
+.clip b{flex:1 1 220px;font-size:13px}
+.ex{background:linear-gradient(135deg,#22d3b7,#3b82f6)!important;border-color:transparent!important;color:#04121f!important}
+.hint{font-size:12px;opacity:.75;margin-top:6px}
+#st,#tinfo{font-size:13px}
+kbd{border:1px solid var(--line);border-radius:4px;padding:0 5px;font-size:11px}
+</style>
+<link rel="stylesheet" href="theme.css">
+<script src="store.js"></script>
+<script src="theme.js" defer></script>
+</head>
+<body>
+<h1>Video Cutter</h1>
+<nav></nav>
+<p class="sub">Cut a video down to the parts you want, then save each cut or keep it in My files so you can analyze it on the other pages. Everything runs in your browser; nothing is uploaded.</p>
+
+<div class="card row" id="drop">
+  <input type="file" id="file" accept="video/*">
+  <span id="st">Choose a video, or open one from My files below.</span>
+</div>
+
+<div class="card">
+  <video id="v" controls playsinline></video>
+  <div id="trk" title="Drag the pink handles to choose the part to keep. Click to jump."><div id="sel"></div><b class="hd" id="ha"></b><b class="hd" id="hb"></b><div id="ph"></div></div>
+  <div class="row" style="margin-top:10px">
+    <button id="bi" title="Start at the current frame (I)">⏮ Start here</button>
+    <label>Start (s) <input type="number" id="ta" min="0" step="0.1"></label>
+    <label>End (s) <input type="number" id="tb" min="0" step="0.1"></label>
+    <button id="bo" title="End at the current frame (O)">⏭ End here</button>
+    <span id="tinfo"></span>
+  </div>
+  <div class="row" style="margin-top:10px">
+    <button id="pf" title="Back one frame (←)">⏪ Frame</button>
+    <button id="nf" title="Forward one frame (→)">Frame ⏩</button>
+    <button id="pv">▶ Preview the cut</button>
+    <label><input type="checkbox" id="lp"> 🔁 Loop preview</label>
+    <label>Speed <select id="spd"><option value=".25">0.25×</option><option value=".5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label>
+    <button class="ex" id="add">➕ Add this cut to my clips</button>
+  </div>
+  <div class="hint"><kbd>Space</kbd> play · <kbd>I</kbd> start · <kbd>O</kbd> end · <kbd>←</kbd><kbd>→</kbd> step one frame</div>
+</div>
+
+<div class="card">
+  <div class="row" style="margin-bottom:8px">
+    <b>✂️ My clips</b>
+    <label>Quality <select id="qual"><option value="8000000">High</option><option value="4000000" selected>Medium</option><option value="1500000">Small file</option></select></label>
+    <label><input type="checkbox" id="snd"> 🔊 Keep sound (you will hear it while it records)</label>
+    <button id="cancel" hidden>✋ Cancel recording</button>
+  </div>
+  <div id="clips"></div>
+  <div class="row" style="margin-top:8px"><button class="ex" id="allk">📁 Keep all in My files</button><button class="ex" id="alls">💾 Save all as files</button></div>
+  <div class="hint">Cutting records the video in real time, so a 10-second cut takes about 10 seconds. Keep this tab open while it records. The result is MP4 when your browser supports it, otherwise WebM.</div>
+</div>
+
+<script type="module">
+const $=id=>document.getElementById(id);
+const v=$('v'),st=$('st'),trk=$('trk');
+let A=0,B=0,previewing=false,busy=false,abortRec=false,srcName='video',drag=null,cn=0;
+const clips=[];
+$('steps')&&$('steps').remove();
+
+const fmtT=t=>{t=Math.max(0,t||0);const m=Math.floor(t/60);return m+':'+(t-m*60).toFixed(2).padStart(5,'0')};
+const dl=(h,n)=>{const a=document.createElement('a');a.href=h;a.download=n;a.click()};
+const seekTo=t=>new Promise(r=>{t=Math.max(0,Math.min(t,(v.duration||0)-.001));if(Math.abs(v.currentTime-t)<.0005)return r();const h=()=>{v.removeEventListener('seeked',h);r()};v.addEventListener('seeked',h);v.currentTime=t});
+
+function load(f){
+  if(!f)return;srcName=(f.name||'video').replace(/\.[^.]+$/,'');Store.lib.add(f);
+  clips.length=0;renderClips();v.src=URL.createObjectURL(f);st.textContent='Loading the video…';
+}
+$('file').onchange=e=>load(e.target.files[0]);
+const dz=$('drop');
+dz.ondragover=e=>{e.preventDefault();dz.classList.add('over')};dz.ondragleave=()=>dz.classList.remove('over');
+dz.ondrop=e=>{e.preventDefault();dz.classList.remove('over');load(e.dataTransfer.files[0])};
+v.onloadedmetadata=async()=>{
+  await Store.fixDuration(v);A=0;B=v.duration;sync();
+  st.textContent=`Ready. The video is ${fmtT(v.duration)} long. Drag the pink handles, then add the cut.`;
+};
+
+function sync(){
+  const d=v.duration;if(!d||!isFinite(d))return;
+  const pa=A/d*100,pb=B/d*100;
+  $('sel').style.left=pa+'%';$('sel').style.width=(pb-pa)+'%';$('ha').style.left=pa+'%';$('hb').style.left=pb+'%';
+  if(document.activeElement!==$('ta'))$('ta').value=A.toFixed(2);if(document.activeElement!==$('tb'))$('tb').value=B.toFixed(2);
+  $('tinfo').textContent=`Keeping ${fmtT(A)} to ${fmtT(B)} (${(B-A).toFixed(2)}s)`;
+}
+const pos=e=>{const r=trk.getBoundingClientRect();return Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*v.duration};
+trk.onpointerdown=e=>{
+  if(!v.duration)return;const r=trk.getBoundingClientRect(),x=e.clientX-r.left,ax=A/v.duration*r.width,bx=B/v.duration*r.width;
+  if(Math.abs(x-ax)<=Math.abs(x-bx)&&Math.abs(x-ax)<16)drag='a';else if(Math.abs(x-bx)<16)drag='b';
+  else{v.currentTime=pos(e);return}
+  trk.setPointerCapture(e.pointerId);
+};
+trk.onpointermove=e=>{if(!drag)return;const t=pos(e);if(drag==='a'){A=Math.min(t,B-.05)}else{B=Math.max(t,A+.05)}v.currentTime=drag==='a'?A:B;sync()};
+trk.onpointerup=trk.onpointercancel=()=>{drag=null};
+$('ta').onchange=()=>{A=Math.max(0,Math.min(+$('ta').value,B-.05));sync();v.currentTime=A};
+$('tb').onchange=()=>{B=Math.min(v.duration,Math.max(+$('tb').value,A+.05));sync();v.currentTime=B};
+$('bi').onclick=()=>{if(v.duration){A=Math.min(v.currentTime,B-.05);sync()}};
+$('bo').onclick=()=>{if(v.duration){B=Math.max(v.currentTime,A+.05);sync()}};
+const step=d=>{v.pause();v.currentTime=Math.max(0,Math.min(v.duration,v.currentTime+d/30))};
+$('pf').onclick=()=>step(-1);$('nf').onclick=()=>step(1);
+$('spd').onchange=()=>{v.playbackRate=+$('spd').value};
+$('pv').onclick=async()=>{if(!v.duration)return;await seekTo(A);previewing=true;v.play()};
+(function tick(){
+  const d=v.duration;if(d&&isFinite(d)){$('ph').style.left=v.currentTime/d*100+'%';
+    if(previewing&&!v.paused&&v.currentTime>=B-.02){if($('lp').checked)v.currentTime=A;else{v.pause();previewing=false}}}
+  requestAnimationFrame(tick)})();
+document.addEventListener('keydown',e=>{
+  if(/INPUT|SELECT|TEXTAREA/.test(e.target.tagName)||e.ctrlKey||e.metaKey||e.altKey)return;
+  const k=e.key.toLowerCase();let ok=true;
+  if(k===' ')v.paused?v.play():v.pause();else if(k==='arrowleft')step(-1);else if(k==='arrowright')step(1);
+  else if(k==='i')$('bi').click();else if(k==='o')$('bo').click();else ok=false;
+  if(ok)e.preventDefault();
+});
+
+// ---- clip list ----
+$('add').onclick=()=>{
+  if(!v.duration)return void(st.textContent='Choose a video first.');
+  clips.push({id:++cn,a:A,b:B});renderClips();st.textContent=`Added clip ${cn}. You can add more cuts from the same video.`;
+};
+const clipName=c=>`${srcName}_cut${c.id}_${c.a.toFixed(1)}-${c.b.toFixed(1)}s`;
+function renderClips(){
+  const box=$('clips');box.innerHTML='';
+  if(!clips.length){const e=document.createElement('div');e.className='hint';e.textContent='No clips yet. Pick a start and end above, then press ➕ Add this cut to my clips.';box.append(e)}
+  for(const c of clips){
+    const r=document.createElement('div');r.className='clip';
+    const t=document.createElement('b');t.textContent=`Clip ${c.id}: ${fmtT(c.a)} to ${fmtT(c.b)} (${(c.b-c.a).toFixed(2)}s)`;
+    const mk=(l,fn,cls)=>{const b=document.createElement('button');b.textContent=l;if(cls)b.className=cls;b.disabled=busy;b.onclick=fn;return b};
+    r.append(t,
+      mk('✏️ Load handles',()=>{A=c.a;B=c.b;sync();v.currentTime=A}),
+      mk('💾 Save file',()=>run([c],'save'),'ex'),
+      mk('📁 Keep in My files',()=>run([c],'keep'),'ex'),
+      mk('🗑️',()=>{clips.splice(clips.indexOf(c),1);renderClips()}));
+    box.append(r);
+  }
+  $('allk').disabled=$('alls').disabled=busy||!clips.length;
+}
+$('allk').onclick=()=>run(clips.slice(),'keep');$('alls').onclick=()=>run(clips.slice(),'save');
+$('cancel').onclick=()=>{abortRec=true};
+
+async function record(a,b){
+  const cap=v.captureStream||v.mozCaptureStream;
+  if(!cap||!window.MediaRecorder){st.textContent='This browser cannot cut videos. Try Chrome, Edge or Firefox.';return null}
+  const snd=$('snd').checked,mt=['video/mp4;codecs=avc1.42E01E','video/mp4','video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'].find(t=>MediaRecorder.isTypeSupported(t));
+  v.pause();await seekTo(a);const muted=v.muted,rate=v.playbackRate;v.muted=!snd;v.playbackRate=1;
+  const stream=cap.call(v);if(!snd)stream.getAudioTracks().forEach(t=>stream.removeTrack(t));
+  const rec=new MediaRecorder(stream,{mimeType:mt,videoBitsPerSecond:+$('qual').value}),chunks=[];
+  rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
+  const done=new Promise(r=>rec.onstop=r);
+  abortRec=false;previewing=false;rec.start(250);await v.play();
+  await new Promise(r=>{const id=setInterval(()=>{st.textContent=`Recording… ${Math.max(0,v.currentTime-a).toFixed(1)} / ${(b-a).toFixed(1)}s`;if(v.currentTime>=b-.03||v.ended||abortRec){clearInterval(id);r()}},100)});
+  v.pause();rec.stop();await done;v.muted=muted;v.playbackRate=rate;
+  return abortRec?null:new Blob(chunks,{type:mt.split(';')[0]});
+}
+async function run(list,mode){
+  if(busy||!list.length)return;busy=true;renderClips();$('cancel').hidden=false;$('add').disabled=true;
+  let n=0;
+  for(const c of list){
+    const blob=await record(c.a,c.b);if(!blob)break;
+    const ext=blob.type==='video/mp4'?'mp4':'webm',name=`${clipName(c)}.${ext}`;
+    if(mode==='save')dl(URL.createObjectURL(blob),name);
+    else await Store.lib.add(new File([blob],name,{type:blob.type,lastModified:Date.now()}));
+    n++;
+  }
+  busy=false;$('cancel').hidden=true;$('add').disabled=false;renderClips();
+  st.textContent=abortRec?'Recording cancelled.':mode==='save'?`Saved ${n} clip(s) to your downloads.`:`Kept ${n} clip(s) in My files. Open them on the Body or Face pages to analyze.`;
+  if(mode==='keep'&&n)Store.badge('📁 Kept in My files');
+}
+renderClips();
+Store.library('video',load);
+</script>
+</body>
+</html>
